@@ -1,0 +1,51 @@
+# Local configuration -- .env.example is committed, .env is not.
+.env
+
+# ── Data and weights are NEVER committed ──────────────────────────────────
+# MIMIC-III/IV is credentialed under a PhysioNet DUA and cannot be
+# redistributed. Nothing derived from it belongs here either: this repository
+# is source only. These patterns are the backstop, not the policy.
+*.pt
+*.pth
+*.ckpt
+*.joblib
+*.pkl
+*.npy
+*.npz
+*.parquet
+*.csv
+*.xlsx
+*.h5
+*.hdf5
+
+# Job output. Results live in the private working repository.
+*.out
+*.err
+*.log
+logs/
+slurm-*
+
+# Credentials
+*.pem
+*.key
+*.p12
+credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
+.Python
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
