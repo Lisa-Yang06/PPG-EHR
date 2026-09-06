@@ -1,63 +1,34 @@
 """
-Convert filtered PPG parquets -> per-patient pickle of CONTIGUOUS 5-MINUTE
-segments (30 consecutive 10-second windows).
+Convert filtered PPG parquets -> per-patient pickle of CONTIGUOUS 10-MINUTE
+segments (60 consecutive 10-second windows).
 
-Same spirit as convert_to_sample100_pkl.py, but the unit of a "sample" is
-no longer a single 10s window — it's a 5-minute contiguous chunk of PPG,
-i.e. 30 windows in a row from the same (record_id, segment), with each
+The unit of a "sample" is not a single 10s window but a 10-minute contiguous
+chunk of PPG: 60 windows in a row from the same (record_id, segment), each
 adjacent pair exactly 10 seconds apart.
 
-Why 5 minutes: HRV literature uses 5min as the standard window for stable
-LF/HF analysis. Single 10s windows showed poor val loss when aligned with
-sEHR (val stuck near random baseline log(256)=5.545), so we want a longer
-PPG context that can carry HRV signal robustly enough to correlate with
-the patient's medical codes within +-12 months.
+NAMING, BECAUSE IT HAS ALREADY MISLED ONE READER
+------------------------------------------------
+The research tree held two near-identical copies of this script differing in
+two lines -- n_windows_per_seg and out_filename -- and the file named
+"..._5min_pkl.py" was the one producing the 10-MINUTE pkl. That is the
+version here, renamed to say what it produces. The genuinely 5-minute variant
+(30 windows -> ppg_sample100_5min.pkl) is not part of this pipeline.
 
-Strictness: a 5-minute segment requires 30 consecutive windows where every
-neighbour pair has window_start_time exactly 10 seconds apart (with a tiny
-float tolerance), AND all 30 share the same record_id + segment. If you
-want to relax later (allow 1-2 missing windows), this is the place.
+The single source of truth is CONFIG below: n_windows_per_seg = 60.
 
-Window selection priority per patient:
-  - Group A: segments whose CENTER time (i.e. window 15's start time,
-    0-indexed 14) falls within +-window_months of >=1 sEHR code in that
-    patient's history db. These won't be dropped by AlignedDataset.__getitem__
-    at training time, so they are sampled first.
-  - Group B: segments with no sEHR overlap. Used only to top up to 100.
-  - Cap at 100 segments/patient (matches the old per-window convert; same
-    rationale: CLIP picks 1 sample per epoch anyway, 100 gives plenty of
-    cross-epoch variety).
+Why a longer window: single 10s windows aligned poorly with sEHR (val loss
+stuck near the random baseline log(256) = 5.545), so the PPG side needs
+enough context to carry HRV structure that can correlate with a patient's
+codes within +-12 months. HRV work conventionally treats 5 minutes as the
+floor for stable LF/HF; 10 minutes sits above it.
 
-Schema of the output pkl (ppg_sample100_5min.pkl):
-    {
-      'patient_id':           str,
-      'dataset':              'III' or 'IV',
-      'signals':              (N, 30, 1250) float32, N<=100 segments,
-                              inner axis is the 30 consecutive 10s windows
-                              that make up one 5-minute segment,
-      'center_times':         (N,) datetime64[ns],
-                              center timestamp of each segment, used at
-                              training time to anchor the sEHR +-window,
-      'segment_start_times':  (N,) datetime64[ns],
-                              start timestamp of window 0 in each segment,
-      'record_id':            list[N],
-      'segment_ids':          list[N], each entry is itself a list of
-                              the unique segment ids the 30 windows came
-                              from (usually 1, can be >1 if the 5-min
-                              chunk spans multiple segment boundaries
-                              that the concat preprocessing left intact),
-      'window_idx_start':     list[N],
-                              window_idx of the first window in each
-                              segment (the other 29 are k+1..k+29 by
-                              construction),
-    }
+Strictness: a segment requires 60 consecutive windows whose neighbouring
+window_start_time values are exactly 10 seconds apart (small float
+tolerance), AND all 60 share one record_id + segment. Relaxing this (say,
+tolerating one or two dropped windows) belongs in find_contiguous_segments.
 
-If a patient is in splits.json but missing from EHR history db, it is
-flagged WARN_NO_EHR_HISTORY (data inconsistency), same handling as in
-convert_to_sample100_pkl.py.
-
-Usage:
-  python convert_to_sample100_5min_pkl.py --dataset both --n-workers 8
+Output: ppg_sample100_10min.pkl, one per patient, read by the alignment
+training scripts via CONFIG['ppg_pkl_filename'].
 """
 import os
 import sys
@@ -94,12 +65,12 @@ CONFIG = {
     'n_samples':       100,        # cap on segments per patient
     'expected_sig_len': 1250,      # 10s at 125Hz
     'win_s':            10,        # one window = 10s
-    'n_windows_per_seg': 30,       # 30 * 10s = 5 minutes
+    'n_windows_per_seg': 60,       # 60 * 10s = 10 minutes
     'time_tolerance_s': 0.5,       # treat 10s+-0.5s as still "exactly 10s"
                                    # (defends against float ts precision wobble;
                                    # if filter pipeline did its job right this
                                    # tolerance is never actually consumed)
-    'out_filename':    "ppg_sample100_5min.pkl",
+    'out_filename':    "ppg_sample100_10min.pkl",
 }
 
 
@@ -123,30 +94,25 @@ def list_ready_pids(dataset):
     return sorted(p.name for p in ppg_dir.iterdir() if p.is_dir())
 
 
-# ── Core: find all valid 5-minute segments in a single patient's parquet ────
-def find_contiguous_5min_segments(df):
+# ── Core: find all valid 10-minute segments in a single patient's parquet ───
+def find_contiguous_segments(df):
     """
     Given a single patient's full parquet DataFrame (one row per 10s window),
-    return a list of dicts, one per valid contiguous 5-minute segment.
+    return a list of dicts, one per valid contiguous 10-minute segment.
 
     A segment is valid iff:
-      - 30 consecutive rows from the SAME record_id (segment id may differ —
-        because the preprocessing concat step already merged segments that
-        were time-adjacent in the original recording, so a single 5-min
-        chunk can legitimately span multiple segment ids as long as the time
-        gap stays exactly 10s)
+      - n_windows_per_seg (60) consecutive rows from the SAME
+        (record_id, segment) group
       - rows are sorted by window_start_time
       - every adjacent time diff is exactly 10s (within time_tolerance_s)
 
     Each returned dict has:
-      'row_indices':       np.ndarray (30,) of original df row positions,
-                           in time order (used later to pull signals)
-      'center_time':       np.datetime64 of window 15's start (0-indexed 14)
+      'row_indices':       np.ndarray (n_windows_per_seg,) of original df row
+                           positions, in time order (used to pull signals)
+      'center_time':       np.datetime64 of the middle window's start
       'start_time':        np.datetime64 of window 0's start
-      'record_id':         the shared record_id
-      'segment_ids':       list of unique segment ids the 30 windows came from
-                           (usually 1, but can be >1 since we group by record_id
-                           only — useful for downstream debugging)
+      'record_id':         the segment's record_id
+      'segment':           the segment's segment id
       'window_idx_start':  window_idx of window 0
     """
     n_required = CONFIG['n_windows_per_seg']
@@ -155,15 +121,10 @@ def find_contiguous_5min_segments(df):
 
     found = []
 
-    # Group by record_id only. Inside one record_id, sort all windows by time
-    # and slide a length-30 window, requiring every adjacent gap to be ~10s.
-    # This means a valid 5-min chunk MAY span multiple segment ids, which is
-    # correct behavior given the preprocessing pipeline's segment-concat step
-    # (segments that were time-adjacent in the raw recording got merged into
-    # one continuous stream of windows, just with different `segment` ids on
-    # the boundary rows).
-    grouped = df.groupby('record_id', sort=False)
-    for rec_id, group in grouped:
+    # Group by (record_id, segment). For each group, sort by time, then slide
+    # a window of size n_required and check that all n_required-1 gaps == 10s.
+    grouped = df.groupby(['record_id', 'segment'], sort=False)
+    for (rec_id, seg_id), group in grouped:
         if len(group) < n_required:
             continue
 
@@ -172,36 +133,47 @@ def find_contiguous_5min_segments(df):
         # don't end up using.
         g_sorted = group.sort_values('window_start_time')
         orig_idx = g_sorted.index.to_numpy()
-        times    = pd.to_datetime(g_sorted['window_start_time'].values).values
-        widx     = g_sorted['window_idx'].to_numpy()
-        seg_ids  = g_sorted['segment'].to_numpy()
+        times = pd.to_datetime(g_sorted['window_start_time'].values).values
+        widx  = g_sorted['window_idx'].to_numpy()
 
         # Slide a window of length n_required over this group's sorted rows.
-        # For each candidate, check all 29 gaps are ~10s.
+        # For each candidate, check all n_required-1 gaps are ~10s.
         n = len(g_sorted)
         gaps = np.diff(times)  # length n-1
         # A gap is "good" if |gap - 10s| <= tol
         good_gap = (gaps >= expected_gap - tol) & (gaps <= expected_gap + tol)
 
+        # Find runs of good_gap. A segment starting at i exists iff
+        # good_gap[i:i+n_required-1] are all True.
+        # We can scan with a sliding sum for efficiency, but n is small here
+        # (typically thousands), so a straightforward loop is fine.
         i = 0
         while i + n_required <= n:
+            # Check n_required-1 gaps from position i:
+            # good_gap[i], good_gap[i+1], ..., good_gap[i+n_required-2]
             window_ok = good_gap[i:i + n_required - 1].all()
             if window_ok:
-                rows = orig_idx[i:i + n_required]
-                unique_segs = list(np.unique(seg_ids[i:i + n_required]))
+                rows = orig_idx[i:i + n_required]  # n_required df indices, in time order
                 found.append({
                     'row_indices':      rows,
                     'center_time':      times[i + n_required // 2 - 1],
                     'start_time':       times[i],
                     'record_id':        rec_id,
-                    'segment_ids':      unique_segs,
+                    'segment':          seg_id,
                     'window_idx_start': int(widx[i]),
                 })
-                # Move past this segment to avoid overlap.
+                # Move past this segment to avoid massive overlap. Step by
+                # n_required so segments within the same group don't overlap.
+                # (Overlap would inflate the cap-100 quota with near-duplicate
+                # chunks that are 99% identical, which doesn't add CLIP
+                # diversity. Non-overlapping is the safer default.)
                 i += n_required
             else:
+                # Skip past the first bad gap in this window. Any segment
+                # starting at i'<=i+gap_position can't be valid because it
+                # would have to include that same bad gap.
                 bad_in_window = np.where(~good_gap[i:i + n_required - 1])[0]
-                first_bad_at = bad_in_window[0]
+                first_bad_at = bad_in_window[0]  # at least one, by definition
                 i += first_bad_at + 1
 
     return found
@@ -216,7 +188,7 @@ def _segment_has_sehr(center_time_dt64, hist_ts, window_delta):
 
 # ── Per-patient conversion ─────────────────────────────────────────────────────
 def convert_one_patient(args):
-    """Convert a single patient's ppg.parquet -> ppg_sample100_5min.pkl.
+    """Convert a single patient's ppg.parquet -> ppg_sample100_10min.pkl.
 
     Returns a small result dict for aggregation/logging in the parent process.
     """
@@ -267,12 +239,12 @@ def convert_one_patient(args):
 
     result['n_total_windows'] = len(df)
 
-    # ── Find all candidate 5-min segments ──
-    candidates = find_contiguous_5min_segments(df)
+    # ── Find all candidate segments ──
+    candidates = find_contiguous_segments(df)
     result['n_candidate_segments'] = len(candidates)
 
     if not candidates:
-        # Patient has windows but no run of 30 consecutive ones with 10s gaps.
+        # Patient has windows but no run of 60 consecutive ones with 10s gaps.
         # This is expected for short / fragmented records.
         result['status'] = 'SKIP_NO_5MIN_SEGMENTS'
         result['elapsed_s'] = time.time() - t0
@@ -343,7 +315,7 @@ def convert_one_patient(args):
         centers.append(seg['center_time'])
         starts.append(seg['start_time'])
         record_ids.append(seg['record_id'])
-        segments_ids.append(seg['segment_ids'])
+        segments_ids.append(seg['segment'])
         widx_starts.append(seg['window_idx_start'])
 
     if not signals_per_seg:
@@ -358,7 +330,7 @@ def convert_one_patient(args):
         'center_times':          np.array(centers, dtype='datetime64[ns]'),
         'segment_start_times':   np.array(starts,  dtype='datetime64[ns]'),
         'record_id':             record_ids,
-        'segment_ids':           segments_ids,
+        'segment':               segments_ids,
         'window_idx_start':      widx_starts,
     }
 
@@ -384,7 +356,10 @@ def convert_one_patient(args):
 # ── Driver ──────────────────────────────────────────────────────────────────
 def run_dataset(dataset, n_workers, limit=None):
     print(f"\n{'='*70}")
-    print(f"Dataset: {dataset}  (target: contiguous 5-min segments, max {CONFIG['n_samples']}/patient)")
+    print(f"Dataset: {dataset}  (target: contiguous segments of "
+          f"{CONFIG['n_windows_per_seg']} windows = "
+          f"{CONFIG['n_windows_per_seg'] * CONFIG['win_s'] // 60} min, "
+          f"max {CONFIG['n_samples']}/patient)")
     print(f"{'='*70}")
 
     print(f"Loading EHR history ({dataset})...")
@@ -437,7 +412,7 @@ def run_dataset(dataset, n_workers, limit=None):
         avg_b       = np.mean([r['n_group_b'] for r in ok_results])
         avg_written = np.mean([r['n_written'] for r in ok_results])
         n_capped_by_a = sum(1 for r in ok_results if r['n_group_a'] >= CONFIG['n_samples'])
-        print(f"  Avg candidate 5-min segments/patient: {avg_cand:.0f}")
+        print(f"  Avg candidate segments/patient: {avg_cand:.0f}")
         print(f"  Avg group A (sEHR in +-{CONFIG['window_months']}mo of center): {avg_a:.0f}")
         print(f"  Avg group B (no sEHR): {avg_b:.0f}")
         print(f"  Avg segments written/patient: {avg_written:.0f}")
@@ -454,7 +429,7 @@ def run_dataset(dataset, n_workers, limit=None):
             if scarce:
                 ns = sorted(r['n_candidate_segments'] for r in scarce)
                 print(f"    (a) {len(scarce)} patients have <{n_target} candidate "
-                      f"5-min segments (genuine scarcity of contiguous 5min data)")
+                      f"segments (genuine scarcity of contiguous data)")
                 print(f"        n_candidate_segments distribution: "
                       f"min={ns[0]}, median={ns[len(ns)//2]}, max={ns[-1]}")
                 print(f"        example pids (first 10): {[r['pid'] for r in scarce[:10]]}")
