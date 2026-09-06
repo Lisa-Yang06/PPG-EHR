@@ -17,7 +17,7 @@ The waveform tree is credentialed PhysioNet data and has no default path;
 pass --waveform-dir explicitly.
 
 Usage:
-    python extract_ppg.py --waveform-dir /path/to/mimic4wdb/0.1.0/waves
+    python extract_ppg_IV.py --waveform-dir /path/to/mimic4wdb/0.1.0/waves
 """
 import argparse
 import os
