@@ -3,24 +3,20 @@ STAGE 5b: properly regularised probes (replaces the hand-rolled Adam loop).
 
 WHY THIS EXISTS
 ---------------
-Diagnostics on train_probe_admission.py showed every probe reaching
-TRAIN AUROC = 1.000 on the both-modality subset:
-
-  variant (label_365)          TRAIN   TEST
-  ehr_pre  scaled wd=1e-3      1.000   0.395
-  ehr_pre  scaled wd=1e-1      1.000   0.463
-  ehr_post RAW    wd=1e-3      0.937   0.644   <- the "good" baseline
-  ehr_post SCALED wd=1e-3      0.997   0.433   <- same features, scaled -> dies
+Diagnostics on train_probe_admission.py showed every probe saturating train
+AUROC on the both-modality subset while test AUROC fell, and the one variant
+that did not saturate lost that property as soon as its features were scaled.
 
 Two conclusions:
   1. torch.optim.Adam(weight_decay=...) adds L2 to the GRADIENT, and Adam's
-     per-parameter normalisation largely cancels it. The knob is inert: wd=1e-1
-     still memorises. (This is exactly why AdamW exists.)
+     per-parameter normalisation largely cancels it. The knob is inert: raising
+     wd by orders of magnitude still memorises. (This is exactly why AdamW
+     exists.)
   2. The only thing that kept ehr_post from memorising was its small magnitude
-     (L2-normalised rows, per-feature std 0.067 vs 1.0 after StandardScaler).
-     That is accidental implicit regularisation, not a modelling choice -- and
-     it means the reported EHR_post advantage was an artefact of feature scale,
-     not of the alignment projection.
+     -- L2-normalised rows have a per-feature std far below the unit std
+     StandardScaler produces. That is accidental implicit regularisation, not a
+     modelling choice, and it means the reported EHR_post advantage was an
+     artefact of feature scale rather than of the alignment projection.
 
 So: LogisticRegression with a real L2 penalty, C chosen by inner CV on the
 training folds only. Scale-invariant by construction, so StandardScaler is now
@@ -110,16 +106,12 @@ HORIZONS = ['label_30', 'label_90', 'label_180', 'label_365']
 N_FOLDS_OUTER = 5
 N_FOLDS_INNER = 3
 RANDOM_SEED = 42
-# Grid floor matters a lot. Measured on ehr_pre / label_365 / both-subset:
-#     C     TRAIN   TEST
-#   1e-6    0.919   0.559
-#   1e-5    0.921   0.558
-#   1e-4    0.942   0.548
-#   1e-3    0.984   0.513
-#   1e-2    0.999   0.470   <- roughly where the old Adam probe sat
-# Monotone: less shrinkage -> more memorisation -> worse generalisation, all the
-# way down. The useful region is 1e-6..1e-5, so the grid has to reach 1e-8 to be
-# sure the optimum is interior and not pinned at the boundary.
+# The grid FLOOR is what matters here, not its ceiling. Train and test AUROC
+# move monotonically against C over this range -- less shrinkage, more
+# memorisation, worse generalisation, all the way down -- and the selected C
+# lands near the bottom of the useful region. The grid therefore has to reach
+# several decades below that region, or the optimum sits pinned at the boundary
+# and the selection is reporting the edge of the grid instead of a choice.
 C_GRID = np.logspace(-8, 2, 21)
 
 # Inner CV needs >= 2 positives in every inner fold to fit AND to score, and
@@ -312,9 +304,9 @@ def run_cv(X, y, groups, tag, fusion=False, dim=128,
         # can be compared PAIRED. The fold-to-fold spread is largely shared
         # across settings (a fold is hard or easy for every probe alike), so
         # the std of the per-fold difference is much smaller than the
-        # difference of the two stds. Without these columns a +0.02 effect
-        # against a 0.05 fold spread is unreadable, and a mean driven by one
-        # lucky fold is indistinguishable from a consistent one. Additive
+        # difference of the two stds. Without these columns an effect smaller
+        # than the fold spread is unreadable, and a mean driven by one lucky
+        # fold is indistinguishable from a consistent one. Additive
         # columns only -- no existing field changes.
         'auroc_per_fold': ','.join(f'{v:.6f}' for v in te_auc),
         'auprc_per_fold': ','.join(f'{v:.6f}' for v in te_ap),

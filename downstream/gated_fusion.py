@@ -49,10 +49,10 @@ sEHR SOURCE FOR THE MIXER AND THE GATE  (--ehr-source)
 
 WHY pca TOUCHES SETTING 4 ALONE
 -------------------------------
-0e_EHR_pre_pca128 showed a label-blind PCA of the same 320-d input reaching
-0a_EHR_pre to within ~0.00x, so 128 dimensions are not what costs
-v_ehr_post its 0.024-0.083 on HF and eMACE -- the aligned projection lost
-the useful directions rather than the budget. That makes PCA-128 the strong
+0e_EHR_pre_pca128 showed a label-blind PCA of the same 320-d input matching
+0a_EHR_pre, so 128 dimensions are not what costs v_ehr_post its deficit on HF
+and eMACE -- the aligned projection lost the useful directions rather than the
+budget. That makes PCA-128 the strong
 128-d sEHR side the learned gate has never had: setting 4 has only ever
 mixed v_ehr_post (degraded) or a random projection.
 
@@ -67,7 +67,7 @@ shape the principal axes. Unsupervised leakage is still leakage. randmlp
 needs no such care -- a random projection never looks at the data.
 
 EXPECT THE GATE-INPUT PROBLEM TO RECUR. The randmlp run showed setting 4
-degrading in 11/12 cells while setting 3, which mixes but does not READ the
+degrading in almost every cell while setting 3, which mixes but does not READ the
 embedding, improved in 8/12 -- the gate struggles to learn from 128
 dimensions with no semantic structure. PCA axes are not aligned-space
 coordinates either, so pair this with --no-emb-in-gate to separate "a
@@ -101,13 +101,15 @@ fixing the same ones in score_fusion.py:
 
     weight decay hit the gate BIAS, which encodes the baseline alpha, so alpha
     was pulled toward sigmoid(0) = 0.5 -- not a neutral value, just an artifact
-    of the parametrisation (the optimum is ~0.25);
+    of the parametrisation, and well above the alpha the selection actually
+    prefers;
 
     one wd covered the gate AND the 128-d head, so a single knob controlled
     both "how much does alpha vary" and "how much is the classifier shrunk";
 
-    WEIGHT_DECAY_GRID stops at 1e-1, which never flattens alpha (measured: sd
-    still 0.054 there), so setting 4 could never degenerate to setting 3 and
+    WEIGHT_DECAY_GRID stops at 1e-1, which never flattens alpha -- its
+    fold-to-fold spread is undiminished at the top of that grid -- so setting
+    4 could never degenerate to setting 3 and
     "the learned gate loses to a fixed alpha" was not separable from "the gate
     was never allowed to stop varying". Every AF fold selected the grid edge.
 
@@ -117,8 +119,8 @@ unflagged run reproduces the published setting-4 numbers exactly; with it on
 the output filename gains _gatefix and nothing is overwritten.
 
 Expect it to close a fairness gap, not to win: setting 4's alpha=0 endpoint is
-1_EHR_post, which sits 0.024-0.083 below 0a_EHR_pre on HF and eMACE, and no
-amount of regularisation fixes a representation deficit.
+1_EHR_post, which sits below 0a_EHR_pre on HF and eMACE, and no amount of
+regularisation fixes a representation deficit.
 
 Usage:
     python gated_fusion.py
@@ -217,19 +219,15 @@ LR_GRID = [3e-3, 1e-2]
 # An earlier version of this comment justified a top of 10 with numbers taken
 # from score_fusion.py's gate (4 inputs, lr=0.05, zero-init). That transfer was
 # wrong: this gate has 261 inputs, lr from [3e-3, 1e-2] and default random
-# init, and all three differences push the same way. Re-measured here at
-# lr=3e-3, 300 epochs:
-#
-#     wd     alpha sd   ||w_gate||
-#     10       0.265       1.45      <- the old top; alpha still varies fully
-#     30       0.150       0.63
-#     100      0.049       0.19
-#     300      0.016       0.063     <- effectively constant
-#     1000      NaN         NaN      <- diverges
+# init, and all three differences push the same way. Re-measuring the gate
+# weight norm and the spread of alpha against wd on this gate showed both
+# falling monotonically across the grid: at the old top value alpha still
+# varies over its full range, and it takes two more decades before alpha is
+# effectively constant. Another decade past that and training diverges.
 #
 # Adam's update size is gradient-magnitude independent, so decay and gradient
-# balance at ||w|| ~ sqrt(n_gate_inputs) / wd. With 261 inputs that is ~16/wd,
-# which the table matches -- and it is why a value tuned on a 4-input gate is
+# balance at ||w|| ~ sqrt(n_gate_inputs) / wd. The measured norms follow that
+# relation -- which is why a value tuned on a 4-input gate is
 # meaningless here.
 #
 # STABILITY CEILING: decoupled decay is p <- p * (1 - lr*wd), so |1-lr*wd| > 1
@@ -311,8 +309,8 @@ def build_pca_estimator(n_components=128, whiten=False):
 
     WHAT THIS ISOLATES
     ------------------
-    v_ehr_post (128, aligned) sits 0.024-0.083 below v_ehr_pre (320) on HF and
-    eMACE. Two candidate causes were confounded: 128 dimensions may not hold
+    v_ehr_post (128, aligned) sits below v_ehr_pre (320) on HF and eMACE. Two
+    candidate causes were confounded: 128 dimensions may not hold
     the information, or the alignment may have kept the wrong 128. This splits
     them, because PCA is the best LINEAR 128-d compression of the same input:
 
@@ -352,8 +350,8 @@ def build_pca_estimator(n_components=128, whiten=False):
                   label. A supervised 320->128 projection could still beat it.
 
     Verified on synthetic data where the label depended on 5 of 320 iid
-    Gaussian dimensions: PCA-128 scored 0.664 against 0.727 for the full 320,
-    purely because those 5 dimensions were not the high-variance ones. Real
+    Gaussian dimensions: there PCA-128 fell well short of the full 320, purely
+    because those 5 dimensions were not the high-variance ones. Real
     BERT embeddings are unlikely to be that adversarial -- the signal is
     probably spread over high-variance directions -- but the possibility is
     why a deficit here does NOT close the question on its own.
@@ -626,7 +624,8 @@ def _split_param_groups(model, wd, gate_wd_fix, wd_head=None):
       gate biases   0.0         the bias sets the BASELINE alpha; decaying it
                                 pulls alpha toward sigmoid(0) = 0.5, which is
                                 not a neutral value but an artifact of the
-                                parametrisation. The optimum here is ~0.25.
+                                parametrisation, and above the alpha the
+                                selection actually prefers.
       head          DEFAULT_WD  held FIXED rather than selected, so the
                                 selected wd has one meaning instead of two.
 
@@ -656,10 +655,10 @@ def _split_param_groups(model, wd, gate_wd_fix, wd_head=None):
     # wd_head given: the head's decay is a SELECTED hyperparameter, so its
     # bias has to come out of the decay for the same reason the gate's did.
     # DEFAULT_WD = 1e-4 on a 128-input head is not a light penalty, it is no
-    # penalty at all: decoupled decay shrinks by (1 - lr*wd) per step, so at
-    # lr=3e-3 the entire 300-step run removes 1e-4 of the weight norm. The
-    # sklearn head that beats it by 0.031 selects C near 1e-5..1e-4, i.e. a
-    # penalty coefficient 1/(2C) of 5000-50000. Pinning it was the bug.
+    # penalty at all: decoupled decay shrinks by (1 - lr*wd) per step, so the
+    # whole run removes a negligible fraction of the weight norm. The sklearn
+    # head that outperforms it selects a C whose penalty coefficient 1/(2C) is
+    # orders of magnitude larger. Pinning it was the bug.
     hw = [p for n, p in model.head.named_parameters() if not n.endswith('bias')]
     hb = [p for n, p in model.head.named_parameters() if n.endswith('bias')]
     return [
@@ -985,8 +984,8 @@ def run_setting4(
     # gets a probe fitted to that block with C selected by inner CV. 4e0 sits
     # BELOW 0e by construction, and the gap widens as alpha moves away from 0
     # (at alpha ~ 0.5, w is a compromise between two different blocks). An
-    # earlier note here read 4e0 against 0e's 0.81 as if they were
-    # commensurable; they are not. What 4e0 supports is the comparison
+    # earlier note here read 4e0 against 0e as if the two were commensurable;
+    # they are not. What 4e0 supports is the comparison
     # 4e0-in-this-run vs 4e0-in-another-run, and 4e0 vs 4e1 within a run.
     per_hE = {h: {'a0': [], 'a1': []} for h in HORIZONS}
     es_flags, cases = [], []
@@ -1032,11 +1031,11 @@ def run_setting4(
             #
             # NOT whitened. An earlier version was, to put both blocks at
             # unit variance per column so alpha would be a clean
-            # per-coordinate weight. Run 6419-6420 measured what that cost:
-            # 0g (whitened PCA through the standard probe) came in BELOW 0e
-            # (the same 128 components unwhitened) in 12/12 cells, mean
-            # -0.046, worst on AF at -0.085 -- which is exactly where setting
-            # 4 collapsed hardest. Whitening rescales every component to unit
+            # per-coordinate weight. A dedicated run measured what that
+            # cost: 0g (whitened PCA through the standard probe) came in
+            # BELOW 0e (the same 128 components unwhitened) in every cell,
+            # and by the widest margin on the disease where setting 4
+            # collapsed hardest. Whitening rescales every component to unit
             # variance, so the low-variance components (mostly noise) arrive
             # at the same scale as the high-variance ones carrying the signal,
             # and the variance ordering that makes PCA work is destroyed.
@@ -1636,10 +1635,9 @@ def main():
 
             # ── 0g: 0e's twin, WHITENED. The only difference. ──
             # SETTLED, and kept as the evidence. When --ehr-source pca still
-            # whitened, setting 4 scored 0.74 against 0e's 0.808; this row
-            # isolated why. 0g came in below 0e in 12/12 cells (mean -0.046,
-            # AF 30d -0.085), so whitening alone accounted for the deficit and
-            # the pca path dropped it (9e57035).
+            # whitened, setting 4 came in well below 0e; this row isolated
+            # why. 0g lost to 0e in every cell, so whitening alone accounted
+            # for the deficit and the pca path dropped it (9e57035).
             #
             # Mechanism: whitening rescales every component to unit variance,
             # so a single L2 penalty no longer protects the high-variance

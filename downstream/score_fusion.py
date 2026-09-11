@@ -14,11 +14,11 @@ Three findings drive this design, none of them speculative:
      enter a 128-d mixer. At score level a model's output is one number
      whatever its input dimension, so 320-d and 128-d combine freely.
 
-  2. concat setting 6 beat its own baseline in 12/12 cells only once the two
-     blocks got SEPARATE penalties, with the PPG block shrunk ~4x (s in
-     0.25-0.5 across all 60 folds, never above 1). Score level takes that to
-     the limit: C_EHR and C_PPG are two independent hyperparameters, each
-     selected on its own modality's inner CV.
+  2. concat setting 6 beat its own baseline only once the two blocks got
+     SEPARATE penalties, and the selected penalty shrank the PPG block
+     several-fold harder than the sEHR one in every fold. Score level takes
+     that to the limit: C_EHR and C_PPG are two independent hyperparameters,
+     each selected on its own modality's inner CV.
 
   3. The learned gate was the worst setting in both gated_fusion runs, at a
      parameter count the positive counts could not support. Mixing two
@@ -35,15 +35,11 @@ are comparable by construction, two embeddings only if alignment made them so.
 WHY OUT-OF-FOLD SCORES ARE MANDATORY
 ------------------------------------
 The combiner trains on (s_e, s_p) pairs. Those must NOT be the base models'
-in-sample predictions. From the concat run, eMACE 365d:
-
-    EHR_pre    TRAIN 0.931  ->  TEST 0.856
-    PPG_post   TRAIN 0.755  ->  TEST 0.723
-
-In-sample the gap is 0.93 vs 0.76, and a large part of it is simply that EHR
-has 320 columns to memorise with and PPG has 128. A combiner fed those pairs
-concludes "trust EHR almost entirely" for a reason that is about column count,
-not information. Out-of-fold scores are honest, so the learned weight is too.
+in-sample predictions. In sample both towers score far above their test
+values, and the sEHR tower inflates more, because it has 320 columns to
+memorise with and PPG has 128. A combiner fed those pairs concludes "trust
+sEHR almost entirely" for a reason that is about column count, not
+information. Out-of-fold scores are honest, so the learned weight is too.
 
 KNOWN CAVEATS, both inherited from stacking_fusion.py
 -----------------------------------------------------
@@ -1066,9 +1062,10 @@ def main():
     print(
         "  This, not AUROC, is the direct readout of 'does trust in PPG vary\n"
         "  by signal quality / timing / code volume'. On a synthetic control\n"
-        "  where PPG was informative only at high quality, the gate reached\n"
-        "  corr = +0.98 while LOSING to the best fixed alpha on AUROC -- so a\n"
-        "  null AUROC delta does not mean the gate learned nothing.\n"
+        "  where PPG was informative only at high quality, the gate recovered\n"
+        "  that dependence almost perfectly in this correlation while still\n"
+        "  LOSING to the best fixed alpha on AUROC -- so a null AUROC delta\n"
+        "  does not mean the gate learned nothing.\n"
         "\n"
         "  Sign convention: alpha is the PPG weight, so a POSITIVE correlation\n"
         "  with a quality field means 'trust PPG more when the signal is\n"

@@ -65,8 +65,8 @@ dropping it is worth stating: with normalisation the score is
     score = w.(Px + b) = (P'w).x + const = u.x + const
 
 which is A320_sEHR_pre's hypothesis class restricted to the <=128-dim row
-space of P. A_sEHR_pca128 - A320 = -0.001 in 12/12 cells says a label-blind
-128-d subspace already loses nothing, so this row cannot EXCEED A320 through
+space of P. A_sEHR_pca128 matched A320 in every cell, so a label-blind 128-d
+subspace already loses nothing and this row cannot EXCEED A320 through
 capacity. What it can differ by is (a) AdamW with early stopping instead of a
 convex solve, and (b) an L2 penalty on the two FACTORS rather than on the
 composite u, which is a nuclear-norm-like penalty and not ridge.
@@ -690,8 +690,8 @@ def candidates(args, frozen=False):
         # base, so there is no "how far from the pretrained vector" for one
         # of them to bound. Searching them separately cost a factor of six
         # in candidates to select on differences that are not identifiable:
-        # in the previous run a single cell picked wd_proj across 0.01 to
-        # 100 in its five folds.
+        # in the previous run a single cell picked wd_proj values spanning the
+        # entire grid across its five folds.
         #
         # It also makes this row and N_randproj_frozen search the same
         # number of candidates, so the trained-vs-random comparison carries
@@ -1234,20 +1234,20 @@ def main():
     ap_.add_argument('--lr', default='0.001,0.003,0.01,0.03',
                      help=('comma-separated rates, SEARCHED jointly with the '
                            'two decays. A single value pins it, which is what '
-                           'this defaulted to before: 0.003, chosen by hand '
-                           'because rho = lr*wd caps the reachable decay and '
-                           '0.003 is what lets the grid reach 100. That was a '
-                           'hand-picked value defended by a cross-run '
-                           'comparison of outer-fold results (AF came out '
-                           '-0.014 at 0.01 and -0.007 at 0.003), which is '
-                           'selection on the test folds and cannot go in a '
-                           'methods section. Searching it puts the choice '
-                           'back inside the nested CV. 0.001 is included '
-                           'because every signal so far points DOWN -- the '
-                           'decays pin to the top of their grid and the '
-                           'early-stopped epoch sits at 3-9 out of 300 -- so '
-                           'the informative direction is a smaller step, not '
-                           'a larger one. NOTE the grid is ragged by '
+                           'this defaulted to before: one rate, chosen by '
+                           'hand because rho = lr*wd caps the reachable decay '
+                           'and only a small enough rate lets the decay grid '
+                           'reach its top value. That was a hand-picked value '
+                           'defended by a cross-run comparison of outer-fold '
+                           'results, which is selection on the test folds and '
+                           'cannot go in a methods section. Searching it puts '
+                           'the choice back inside the nested CV. The lowest '
+                           'rate is included because every signal so far '
+                           'points DOWN -- the decays pin to the top of their '
+                           'grid and the early stop fires in the first few '
+                           'epochs of the budget -- so the informative '
+                           'direction is a smaller step, not a larger one. '
+                           'NOTE the grid is ragged by '
                            'construction: rho caps wd at 300/100/30/10 as lr '
                            'goes 0.001/0.003/0.01/0.03, so which decays are '
                            'reachable depends on which rate is being tried. '
@@ -1511,8 +1511,8 @@ def main():
             # stable across runs, a selected one makes it the strongest the
             # baseline can be, and only the second is a fair thing to measure
             # a method against. The gap between the two rows says how much of
-            # any "beats A320" is the baseline being handicapped -- on the
-            # sklearn run that gap was 0.017.
+            # any "beats A320" is the baseline being handicapped; on the
+            # sklearn run that gap was not negligible.
             r2 = run_torch_baseline(E_h, y, g_h, folds_h, args,
                                     'A320_sEHR_pre_selC')
             r2.update(setting='A320_sEHR_pre_selC', disease=disease,
@@ -1532,8 +1532,9 @@ def main():
             # the block the fusion rows actually mix, so it is the reference
             # for "what does the PPG side bring on its own". PPG512_pre is
             # what was in the PPG embedding BEFORE the alignment projection,
-            # so post - pre is what that projection did to the PPG side --
-            # the strongest signal on record in this project (+0.022, 11/12).
+            # so post - pre is what that projection did to the PPG side,
+            # which is the largest and most consistent effect this project
+            # has measured.
             #
             # Their vs column is a CROSS-MODALITY difference, PPG against the
             # sEHR baseline, not "method against its own control" as it is

@@ -11,8 +11,8 @@ gated_fusion.py's setting 4 could not answer it. Two structural gaps:
 
   1  its classifier was a torch Linear trained at a fixed epoch budget, and
      4b -- the SAME gate, the SAME per-admission alpha, only the classifier
-     swapped for the inner-CV L2 logistic that 0a uses -- beat it in 12/12
-     cells by +0.031. The head, not the representation, was binding.
+     swapped for the inner-CV L2 logistic that 0a uses -- beat it in every
+     cell, by a wide margin. The head, not the representation, was binding.
 
   2  setting 4 fits ONE model across the four horizons while 0a fits four
      independent ones. A shared model also sees all four horizons' labels,
@@ -26,11 +26,11 @@ survive StandardScaler only as a zeroed column and a wasted parameter.
 
 THE sEHR SIDE
 -------------
-PCA(128) of v_ehr_pre, block-scaled, fitted inside the fold. 0e ~ 0a in 12/12
-(mean -0.001), so this compression is free and the fusion is not being handed
-a degraded sEHR side the way v_ehr_post is (1_EHR_post - 0a_EHR_pre = -0.030
-on average, -0.050 on eMACE). Not whitened: whitening cost 0.046 AUROC in
-12/12 (see gated_fusion.py, run 6419-6420).
+PCA(128) of v_ehr_pre, block-scaled, fitted inside the fold. 0e matches 0a in
+every cell, so this compression is free and the fusion is not being handed a
+degraded sEHR side the way v_ehr_post is -- the aligned 128-d vector sits
+below 0a_EHR_pre, worst on eMACE. Not whitened: whitening measurably cost
+AUROC in every cell (see gated_fusion.py).
 
 WHAT MAKES THE COMPARISON FAIR, AND THE ONE THING THAT STILL DIFFERS
 --------------------------------------------------------------------
@@ -54,7 +54,7 @@ Per horizon there are ~1480 training rows and 42-124 training positives.
 
 So --gate-input scalars is the variant with a real chance, and it is the one
 to read. The emb variant is run as the control: the randmlp run already showed
-setting 4 degrading in 11/12 cells while setting 3 -- which MIXES the
+setting 4 degrading in almost every cell while setting 3 -- which MIXES the
 embedding but does not READ it -- improved in 8/12, i.e. the gate struggles to
 learn from 128 dimensions with no semantic structure. This tests that again
 under a budget where it is even less plausible.
@@ -157,8 +157,8 @@ ALPHA_GRID = [round(0.05 * i, 2) for i in range(21)]
 # weight coordinate could move at most 3.0 over the whole run (Adam's step is
 # gradient-magnitude independent, so |dw| per step ~ lr). Two independent
 # signs that this was binding: 4b -- the same mixture under an inner-CV
-# logistic -- beat setting 4 in 12/12 cells by +0.031, and 13 of 15 outer
-# folds selected the LARGEST lr on offer. Both say "the head had not
+# logistic -- beat setting 4 in every cell, and nearly every outer fold
+# selected the LARGEST lr on offer. Both say "the head had not
 # converged", not "the representation is weak".
 #
 # These override gated_fusion's module globals for THIS PROCESS ONLY. That
@@ -188,7 +188,7 @@ class BlockPrep(BaseEstimator, TransformerMixin):
     axes -- unsupervised, but still leakage.
 
     The block scaling is ONE scalar. Relative variance between components is
-    untouched (whitening destroys it, and cost 0.046 AUROC in 12/12), while the
+    untouched (whitening destroys it, at a measured cost in AUROC), while the
     block's mean column variance becomes 1, matching what StandardScaler leaves
     on the PPG side. That is what makes alpha a block-level weight rather than
     an accident of the two blocks' scales.
@@ -348,20 +348,17 @@ def select_C(F_tr, y_tr, g_tr):
 WD_GRID = [1e-2, 1e-1, 1.0, 10.0, 30.0]
 WD_GATE_GRID = WD_GRID
 WD_HEAD_GRID = WD_GRID
-# 0.1 was added because lr sat at 3e-2 in every fold of several cells, and
-# then REMOVED because job 6686-6688 showed it was harmful. rho = lr*wd caps
-# the per-step shrinkage but does nothing about total travel: (lr=0.1, wd=1)
-# decays exactly as fast per step as (lr=0.03, wd=3.3) while taking gradient
-# steps 3.3x larger, so the adapter runs much further before decay catches it.
-# The three worst cells were precisely the ones that selected 0.1 --
-#
-#   eMACE 30d fixed  lr 0.1,0.1,0.1,...  ||A(x)|| 55.7  cos 0.124  0.857->0.828
-#   HF    30d fixed  lr 0.1,...          ||A(x)|| 26.9  cos 0.287  0.879->0.836
-#   AF    30d only   lr ...,0.1,...      ||A(x)|| 13.3  cos 0.244  0.803->0.671
-#
-# -- against ||A(x)|| ~ 2.5, cos ~ 0.44 for the same cell one run earlier. A
-# grid edge being selected is a request to widen; it is not a promise that
-# widening helps.
+# A tenth was added because lr sat at the grid edge in every fold of several
+# cells, and then REMOVED because a later run showed it was harmful. rho =
+# lr*wd caps the per-step shrinkage but does nothing about total travel: a
+# larger rate paired with a smaller decay shrinks exactly as fast per step
+# while taking proportionally larger gradient steps, so the adapter runs much
+# further before decay catches it. The cells that lost the most AUROC were
+# precisely the ones that selected the largest rate, and their diagnostics
+# show it: the adapter's output norm dwarfs the frozen vector it corrects and
+# the cosine to that vector collapses, i.e. the pretrained representation has
+# been overwritten rather than adjusted. A grid edge being selected is a
+# request to widen; it is not a promise that widening helps.
 LR_GRID_E = [3e-3, 1e-2, 3e-2]
 
 # AdamW's decoupled decay multiplies the old weight by (1 - lr*wd) every step,
@@ -657,10 +654,9 @@ def oof_alpha(X, M, y, groups, gate_input, seed, wd_g, wd_h, lr, ep):
 # The convex mixture ties the two blocks through a single w, so coordinate j
 # of ze and of zp had better mean the same thing -- true in the aligned space,
 # false for PCA axes. The evidence that this matters is AF, where alignment
-# costs the sEHR side nothing (1_EHR_post - 0a ~ 0.000) and the ALIGNED fixed-
-# alpha mixture beats 0a by +0.008 in 4/4 cells while the PCA one manages
-# +0.000. On HF and eMACE the aligned side starts 0.039-0.050 below 0a and no
-# mixing recovers that.
+# costs the sEHR side nothing and the ALIGNED fixed-alpha mixture beats 0a in
+# every cell while the PCA one is flat against it. On HF and eMACE the aligned
+# side starts well below 0a and no mixing recovers that.
 #
 # So: keep the aligned space, repair the deficit. z_E_post stays frozen and a
 # small low-rank residual is added to it:
@@ -696,8 +692,9 @@ def oof_alpha(X, M, y, groups, gate_input, seed, wd_g, wd_h, lr, ep):
 # EXPECT A CEILING. The adapter works on the sEHR side, and the sEHR side is
 # not what caps the PPG increment: alpha_fusion already ran the fusion with an
 # undamaged sEHR side (PCA-128 ~ A320) and it still lost. Six methods have now
-# put PPG's marginal contribution at ~+0.008. The realistic best case here is
-# recovering that same +0.008 at the EMBEDDING level, which score-level
+# put PPG's marginal contribution at the same small positive value. The
+# realistic best case here is recovering that increment at the EMBEDDING
+# level, which score-level
 # fusion already reaches -- worth having because embedding fusion is the
 # intended final method, not because more signal is expected.
 
@@ -706,13 +703,14 @@ def oof_alpha(X, M, y, groups, gate_input, seed, wd_g, wd_h, lr, ep):
 # a row that cannot express them reports a property of the grid rather than of
 # the data.
 #
-# The top was 0.5 until job 6745 showed AF 30d selecting it in all five folds.
-# Capping there was an arbitrary restriction of mine, unlike the weight-decay
+# The top was 0.5 until a run showed one cell selecting that cap in every
+# fold, which is a grid boundary reporting itself rather than a choice.
+# Capping there was an arbitrary restriction, unlike the weight-decay
 # ceiling, which has a principled endpoint -- wd -> infinity converges on the
-# frozen aligned vector, and that is measurably worse. AF 30d is also the cell
-# where PPG alone comes closest to the sEHR baseline (0.786 against 0.808,
-# -0.022, against -0.148 and -0.116 on HF and eMACE), so wanting a larger
-# mixing weight there is what the data would predict.
+# frozen aligned vector, and that is measurably worse. That cell is also
+# where PPG alone comes closest to the sEHR baseline -- far closer than on HF
+# or eMACE -- so wanting a larger mixing weight there is what the data would
+# predict.
 #
 # Cost: the fixed-alpha rows scale linearly with this list, 220 -> 420
 # candidates, so the three G rows go 320 -> 520 and a disease from ~50 to
@@ -1045,11 +1043,11 @@ def run_adapter(Xa, M, y, groups, folds, gate_input, args, mode,
         'alpha_std_within': float(np.mean(a_sd)) if a_sd else np.nan,
         # alpha_std_within is the WITHIN-fold spread averaged over folds, so
         # for a frozen alpha it is identically zero BY CONSTRUCTION and a
-        # printed "0.230+-0.000" reads as stability when it is a tautology.
-        # The spread that exists is ACROSS folds: HF 30d selected
-        # 0.35, 0, 0.4, 0.3, 0.1 in its five folds, sd 0.154, one of them
-        # declining PPG entirely. That is the inner CV failing to identify the
-        # mixing weight -- the same fact the ~0.003 best-vs-third gap reports.
+        # printed "+-0.000" reads as stability when it is a tautology. The
+        # spread that exists is ACROSS folds: a single cell can select alpha
+        # anywhere across the grid in its five folds, one of them declining
+        # PPG entirely. That is the inner CV failing to identify the mixing
+        # weight -- the same fact the flat best-vs-third gap reports.
         'alpha_std_across': float(np.std(a_mu)) if a_mu else np.nan,
         'n_valid_folds': len(auc), 'folds_without_selection': n_no_sel,
         'sel_wd_gate': ','.join(f'{a:g}' for a, _, _ in sel),
@@ -1171,18 +1169,18 @@ def main():
                     help=('fix the learning rate instead of selecting it, '
                           'collapsing LR_GRID_E to this single value. Three '
                           'reasons, all measured. (1) The inner-validation gap '
-                          'between the best and third-best candidate is ~0.003 '
-                          'against a fold-to-fold sd near 0.03, so an argmax '
-                          'over hundreds of candidates is mostly selecting '
-                          'noise, and removing an axis divides the count by '
-                          'three. (2) Job 6686-6688 is a direct demonstration '
-                          'that lr selection can pick a value that generalises '
-                          'worse: the three collapsed cells are exactly the '
-                          'ones whose inner CV chose lr=0.1. (3) lr is an '
-                          'optimisation detail, not a quantity this analysis '
-                          'reports, unlike the decays and alpha. 0.01 is the '
-                          'modal choice on the clean run -- 28 of 60 fold '
-                          'selections against 21 for 0.003 and 11 for 0.03. '
+                          'between the best and third-best candidate is an '
+                          'order of magnitude smaller than the fold-to-fold '
+                          'spread, so an argmax over hundreds of candidates is '
+                          'mostly selecting noise, and removing an axis '
+                          'divides the count by three. (2) A run exists in '
+                          'which lr selection picked a value that generalises '
+                          'worse: the cells that collapsed are exactly the '
+                          'ones whose inner CV chose the largest rate. (3) lr '
+                          'is an optimisation detail, not a quantity this '
+                          'analysis reports, unlike the decays and alpha. The '
+                          'value to pin is the modal choice across folds on '
+                          'the clean run, which the log prints. '
                           'Left unset the grid is searched as before, so the '
                           'choice is visible in the command and the log rather '
                           'than buried in the code.'))
@@ -1196,8 +1194,9 @@ def main():
                           'pinned itself to. And Adam puts a floor under the '
                           'encoder that no decay can cross: its step is ~lr '
                           'per coordinate regardless of gradient, so '
-                          '||W_up|| >~ lr*sqrt(2048) = 0.45 at lr=0.01, '
-                          'against an observed minimum of 0.82. Raising the '
+                          '||W_up|| >~ lr*sqrt(2048), which at the shared lr '
+                          'is the same order as the smallest norm any fold '
+                          'actually reached. Raising the '
                           'decay cannot reach "adapter almost off"; only a '
                           'smaller step can.'))
     ap.add_argument('--skip-e', action='store_true',
@@ -1393,8 +1392,8 @@ def main():
                     # alpha the within-fold spread is zero by construction and
                     # tells the reader nothing, so the ACROSS-fold spread of
                     # the SELECTED value is shown instead, suffixed 'f'. That
-                    # number is the one that matters there: HF 365d selected
-                    # 0.6, 0.2, 0.05, 0.3, 0.4 across its five folds.
+                    # number is the one that matters there: a single cell can
+                    # select alpha anywhere across the grid in its five folds.
                     w = r.get('alpha_std_within', np.nan)
                     ac = r.get('alpha_std_across', np.nan)
                     if np.isfinite(w) and w > 1e-9:
@@ -1455,7 +1454,7 @@ def main():
     # ── what got selected, and whether the grid was wide enough ──
     # An axis pinned to a grid edge in EVERY fold does not mean that value is
     # right; it means the search wanted to keep going. gated_fusion took the
-    # largest lr on offer in 13 of 15 folds and nobody noticed, which is how
+    # largest lr on offer in nearly every fold and nobody noticed, which is how
     # an undertrained head survived several rounds of analysis. These are
     # diagnostics only -- none of them feeds back into the grid automatically.
     # Skipped entirely when --skip-e removed the only rows it describes,
@@ -1684,8 +1683,9 @@ def main():
     print('  where alpha is frozen that spread is zero by construction, so')
     print('  the ACROSS-fold spread of the SELECTED value is shown instead,')
     print('  suffixed "f", and repeated as "a sd/fold" in the diagnostics.')
-    print('  It is large -- HF 365d selected 0.6, 0.2, 0.05, 0.3, 0.4 across')
-    print('  its five folds. The inner CV cannot identify the mixing weight.')
+    print('  It is large -- a cell can select alpha anywhere across the grid')
+    print('  in its five folds. The inner CV cannot identify the mixing')
+    print('  weight.')
     print()
     print('  A320_sEHR_pre is the opponent. Everything here is fitted per')
     print('  horizon on the same outer folds with the same C selection, so')
@@ -1709,10 +1709,11 @@ def main():
     print('  E_learned_alpha is ONE scheme end to end: gate and head trained')
     print('  together by AdamW, both decays selected, refitted on the full')
     print('  outer-train. E_sklearnhead takes that same alpha and swaps only')
-    print('  the classifier. In gated_fusion the equivalent gap was +0.031, but')
-    print('  that comparison also gave the sklearn side 33% more training rows')
-    print('  and left the torch head effectively unregularised. Both are fixed')
-    print('  here, so a gap that persists is a real property of the recipe.')
+    print('  the classifier. In gated_fusion that swap alone was worth a wide')
+    print('  margin, but that comparison also gave the sklearn side 33% more')
+    print('  training rows and left the torch head effectively unregularised.')
+    print('  Both are fixed here, so a gap that persists is a real property')
+    print('  of the recipe.')
 
 
 if __name__ == '__main__':
