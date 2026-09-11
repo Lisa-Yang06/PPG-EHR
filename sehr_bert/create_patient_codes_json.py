@@ -120,7 +120,7 @@ if __name__ == "__main__":
 
     if args.dataset == "IV":
         build_and_save(
-            str(paths.data_root() / "MIMICIV_sEHR_cleaned"),
+            str(paths.data_root() / "MIMIC_IV_sEHR_cleaned"),
             proc_time_col="chartdate",
             med_time_col="starttime",
             save_path=str(paths.data_root() / "patient_history_db_IV.joblib"),

@@ -250,7 +250,7 @@ print(multi_d[["icd_version","icd_code","diagnosis_code_icd10"]].head(10).to_str
 print(f"diagnose mapping result: {diagnose['diagnosis_code_icd10'].isna().sum()} NAs out of {len(diagnose)} rows")
 diagnose = diagnose[diagnose["diagnosis_code_icd10"].notna()].copy()
 
-diagnose.to_csv(str(paths.data_root() / "MIMICIV_sEHR_cleaned/diagnose_icd10_mapped.csv"), index=False)
+diagnose.to_csv(str(paths.data_root() / "MIMIC_IV_sEHR_cleaned/diagnose_icd10_mapped.csv"), index=False)
 
 print(">>> Mapping procedure -> procedure_code_icd10 ...")
 t1 = time.time()
@@ -280,4 +280,4 @@ mapped = procedure['procedure_code_icd10'].notna().sum()
 print(f"Procedure mapping rate: {mapped}/{total} = {mapped/total:.1%}")
 
 procedure = procedure[procedure["procedure_code_icd10"].notna()].copy()
-procedure.to_csv(str(paths.data_root() / "MIMICIV_sEHR_cleaned/procedure_icd10_mapped.csv"), index=False)
+procedure.to_csv(str(paths.data_root() / "MIMIC_IV_sEHR_cleaned/procedure_icd10_mapped.csv"), index=False)

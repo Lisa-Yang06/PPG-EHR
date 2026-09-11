@@ -78,7 +78,6 @@ if _ROOT not in sys.path:
 import paths
 
 import os
-os.environ.setdefault('MPLCONFIGDIR', str(paths.data_root() / ".cache/matplotlib"))
 
 import argparse
 import json

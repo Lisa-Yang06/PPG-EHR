@@ -17,5 +17,5 @@ df = pd.read_csv(str(paths.data_root() / "MIMICIV_sEHR_raw/mimic_iv_pres_raw.csv
 df["ndc"] = df["ndc"].astype("string").str.strip()
 df = df[df["ndc"].notna() & (df["ndc"] != "0")]
 
-df.to_csv(str(paths.data_root() / "MIMICIV_sEHR_cleaned/prescriptions_cleaned.csv"), index=False)
+df.to_csv(str(paths.data_root() / "MIMIC_IV_sEHR_cleaned/prescriptions_cleaned.csv"), index=False)
 print("after cleaning, shape:", df.shape)

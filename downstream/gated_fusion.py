@@ -129,7 +129,6 @@ Usage:
     python gated_fusion.py --ehr-source randmlp --rand-seed 0
 """
 import os
-os.environ.setdefault('MPLCONFIGDIR', str(paths.data_root() / ".cache/matplotlib"))
 
 import argparse
 import inspect

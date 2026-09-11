@@ -40,8 +40,14 @@ SLURM jobs, needs no parser, and cannot be accidentally committed. Copy
 .env.example to .env and source it, or export the four variables in a job
 script -- both work, and neither is checked in.
 
-Roots resolve LAZILY, on first use. Importing this module never fails, so
-`--help` and unit tests keep working on a machine with none of the data.
+Roots resolve LAZILY, on first use, so importing THIS module never fails on a
+machine with none of the data.
+
+That does not extend to every script. Most of them build their file paths as
+module-level constants, which calls data_root() at import time, so they need
+the environment set even to print `--help`. The error says which variable is
+missing and what it is for, which is the useful behaviour on a cluster; it is
+not a machine you can explore the code on without the data mounted.
 """
 import os
 import sys

@@ -105,7 +105,6 @@ Usage:
     python alpha_fusion.py --disease AF --oof-alpha
 """
 import os
-os.environ.setdefault('MPLCONFIGDIR', str(paths.data_root() / ".cache/matplotlib"))
 
 import argparse
 import sys

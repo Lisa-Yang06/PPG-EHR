@@ -150,7 +150,6 @@ Usage:
     python plain_mlp.py --disease AF
 """
 import os
-os.environ.setdefault('MPLCONFIGDIR', str(paths.data_root() / ".cache/matplotlib"))
 
 import argparse
 import sys

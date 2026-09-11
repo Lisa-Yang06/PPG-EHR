@@ -125,6 +125,6 @@ def load_data_from_csv(
 
 if __name__ == "__main__":
     # Example usage
-    vocab_size = calculate_vocab_size(str(paths.data_root() / "MIMIC_III_cleaned/diagnose_icd10_mapped_50.csv"), 
-                                      str(paths.data_root() / "MIMIC_III_cleaned/procedure_icd10_mapped_50.csv"), 
-                                      str(paths.data_root() / "MIMIC_III_cleaned/prescriptions_cleaned_50.csv"))
+    vocab_size = calculate_vocab_size(str(paths.data_root() / "MIMIC_III_sEHR_cleaned/diagnose_icd10_mapped_50.csv"), 
+                                      str(paths.data_root() / "MIMIC_III_sEHR_cleaned/procedure_icd10_mapped_50.csv"), 
+                                      str(paths.data_root() / "MIMIC_III_sEHR_cleaned/prescriptions_cleaned_50.csv"))
