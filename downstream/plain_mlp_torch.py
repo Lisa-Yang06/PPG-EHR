@@ -106,45 +106,61 @@ linear_fusion's M_only is the missing F.normalize, so a difference in the
 numbers cannot come from a difference in protocol, and every row here is
 comparable fold by fold to everything already computed.
 
-POOLED OOF AND THE BOOTSTRAP INTERVAL
--------------------------------------
-Every row now reports TWO uncertainty surfaces, and they answer different
-questions. Reporting either as if it were the other would be wrong.
+UNCERTAINTY: POINT ESTIMATE, INTERVAL, AND THE PAIRED DIFFERENCE
+----------------------------------------------------------------
+The reported estimate is what it has always been: auroc_mean, the mean of the
+five per-fold metrics. The interval is built the same way the estimate is --
+resample PATIENTS within each outer test fold, recompute that fold's metric,
+average the five, and take the 2.5th/97.5th percentiles of those bootstrap
+means.
 
-  auroc_mean +- auroc_std_fold   the five per-fold AUROCs, averaged, and their
-                                 spread. "How much does the answer move when
-                                 the partition moves."
+Resampling is by patient, not admission. One patient can contribute several
+admissions and those rows are correlated, so resampling admissions would count
+them as independent evidence and return an interval that is too narrow. The
+outer CV groups by patient for the same reason. The metric stays
+admission-level; only the resampling unit is the patient.
 
-  auroc_oof (ci_low-ci_high)     ONE AUROC on all five folds' outer-test
-                                 predictions concatenated, and a 95% interval
-                                 from resampling PATIENTS. "How well are these
-                                 admissions ranked, and how much would that
-                                 move on another sample of patients."
+A fold draw containing one class has no AUROC and is redrawn, so every
+replicate averages the same folds. At low-positive cells the accepted draws
+are therefore conditioned on containing a positive and the interval is
+optimistic by an unquantified amount; n_fold_redraws reports how often that
+fired.
 
-The pooled estimate is NOT the mean of the fold estimates and need not equal
-it. It also carries an assumption the fold mean does not: each outer fold
-selects its own wd/lr/epoch and returns RAW LOGITS on its own scale, so
-pooling ranks fold-A admissions against fold-B admissions on scales that were
-never made commensurable. AUROC and AUPRC are rank-based, which makes this
-well defined, not free -- a fold whose logits sit higher drags its rows up the
-joint ranking.
+The interval covers PATIENT SAMPLING ONLY -- nothing about fold assignment or
+hyperparameter selection, which is the part auroc_std_fold gestures at.
+Neither number is a superset of the other.
 
-The interval covers PATIENT SAMPLING ONLY. It contains nothing about
-fold-assignment or hyperparameter-selection variability, which is the part
-auroc_std_fold gestures at. Neither number is a superset of the other.
+  delta_auroc (ci_low, ci_high)   N_gate_alpha minus A320_sEHR_pre_selC, both
+                                  scored on IDENTICAL replicates and
+                                  differenced per replicate.
 
-Resampling is by PATIENT, not admission: a patient contributing several
-admissions makes those rows correlated, and resampling admissions would count
-them as independent and return an interval that is too narrow. The outer CV
-groups by patient for the same reason. The metric stays admission-level; only
-the resampling unit is the patient. A replicate with one class has no AUROC
-and is redrawn, so at low-positive cells the accepted replicates are
-conditioned on containing a positive -- n_boot_draws exposes how often that
-happened.
+That difference is the comparison to report. Two marginal intervals
+overlapping does not mean the difference includes zero: the fold-to-fold noise
+the two rows share cancels inside a replicate, so the paired interval is
+narrower than any overlap test between the marginals.
 
-The per-admission predictions are written to a companion _oof.csv, so a paired
-delta-AUROC between two rows, a calibration curve or an error-case listing can
-be built later without retraining.
+WHY THE POOLED NUMBER IS A DIAGNOSTIC AND NOT THE HEADLINE
+----------------------------------------------------------
+auroc_oof -- one metric over all folds' predictions concatenated -- is still
+reported, without an interval, because it is the thing the cross-fold score
+block exists to explain.
+
+Each outer fold selects its own wd/lr/epoch and returns RAW LOGITS on its own
+scale, so pooling ranks fold-A admissions against fold-B admissions on scales
+never made commensurable. A fold whose logits sit higher drags its rows up the
+joint ranking and depresses the pooled value without any fold discriminating
+worse. The fold mean is immune, being rank-based within a fold.
+
+So a pooled value far below a row's fold mean is a question, not a finding.
+The CROSS-FOLD SCORE SCALE block at the end of a run answers it: if per-fold
+score means swing widely while the within-fold positive-negative gap holds up,
+the gap is a calibration artefact. Building a confidence interval on the
+pooled ranking would have propagated that artefact into the interval, which is
+why it is not done.
+
+The per-admission predictions are written to a companion _oof.csv, so a
+calibration curve, another paired comparison or an error-case listing can be
+built later without retraining.
 
 Usage:
     python plain_mlp.py --disease AF
@@ -203,120 +219,135 @@ ALPHA_GRID = [round(0.05 * i, 2) for i in range(21)]
 # every interval too, and the two can then no longer be audited apart.
 BOOTSTRAP_SEED = 42
 N_BOOT = 2000
-# A replicate with one class in it has no AUROC, so it is discarded and
-# redrawn until N_BOOT valid ones exist. On a cell with very few positives
-# that loop could run a long time; this caps the draws and reports how many
-# were needed instead of hanging.
-BOOT_MAX_DRAW_FACTOR = 20
+# A fold whose resampled rows are single-class has no AUROC, so that fold's
+# draw is redrawn until valid. Every replicate then averages the SAME folds
+# and the estimand does not drift between replicates. On a cell with very few
+# positives that loop could run long; this caps the attempts per fold draw.
+BOOT_MAX_REDRAWS = 200
 
 
 def _alpha_grid(n):
     return [round(i / (n - 1), 4) for i in range(n)] if n > 1 else [0.0]
 
 
-def _boot_patient_indices(y, groups, n_boot=N_BOOT, seed=BOOTSTRAP_SEED,
-                          max_draw_factor=BOOT_MAX_DRAW_FACTOR):
-    """Row indices for n_boot patient-clustered bootstrap replicates.
+def _fold_boot_indices(y, groups, fold_h, valid_folds, n_boot=N_BOOT,
+                       seed=BOOTSTRAP_SEED, max_redraws=BOOT_MAX_REDRAWS):
+    """Replicate row indices for a FOLD-PRESERVING patient-cluster bootstrap.
 
-    The independence unit is the PATIENT, not the admission: one patient can
-    contribute several admissions and those share age, comorbidity and
-    everything else stable about them, so resampling admissions would treat
-    correlated rows as independent evidence and return an interval that is
-    too narrow. The outer CV groups by patient for the same reason.
+    The reported point estimate is the mean of the five per-fold metrics, so
+    the interval has to be built the same way: resample WITHIN each outer test
+    fold, recompute that fold's metric, average the five. Resampling across
+    the pooled rows instead would answer a different question and would carry
+    the pooled ranking's cross-fold calibration problem into the interval.
 
-    Each replicate draws len(patients) patients WITH REPLACEMENT and takes
-    every admission of each drawn patient; a patient drawn twice contributes
-    its admissions twice. The number of ADMISSIONS per replicate therefore
-    varies -- that is the cluster bootstrap working, not a defect.
+    The independence unit is the PATIENT. One patient can contribute several
+    admissions and those share everything stable about them, so resampling
+    admissions would treat correlated rows as independent evidence and return
+    an interval that is too narrow. assign_folds already guarantees a patient
+    never spans two folds, so "the patients of fold k" is unambiguous and no
+    patient can appear in two folds of one replicate.
 
-    Returns (list of index arrays, n_drawn). n_drawn > len(list) means
-    replicates were rejected for being single-class.
+    A patient drawn twice contributes its admissions twice, so the admission
+    count per fold varies between replicates. That is the cluster bootstrap
+    working, not a defect.
+
+    A fold draw containing only one class has no AUROC. That fold is redrawn
+    until valid, so every replicate averages the same folds; dropping the fold
+    instead would average four folds in some replicates and five in others,
+    which is a different estimand. The cost is that at low-positive cells the
+    accepted draws are conditioned on containing a positive, which narrows the
+    interval -- n_fold_redraws reports how often that happened.
+
+    The draws depend only on (y, groups, fold_h, valid_folds, seed) and NOT on
+    any model's scores, so every row in a cell is bootstrapped on identical
+    patient draws. That is what makes a paired difference between two rows
+    valid: the fold-to-fold noise they share cancels within a replicate.
+
+    Returns (list of {fold_id: row_index_array}, n_fold_redraws).
     """
     y = np.asarray(y)
-    pats, inv = np.unique(np.asarray(groups), return_inverse=True)
-    rows_by_pat = [np.flatnonzero(inv == i) for i in range(len(pats))]
+    groups = np.asarray(groups)
+    fold_h = np.asarray(fold_h)
     rng = np.random.default_rng(seed)
 
-    out, drawn = [], 0
-    max_draws = max_draw_factor * n_boot
-    while len(out) < n_boot and drawn < max_draws:
-        drawn += 1
-        pick = rng.integers(0, len(pats), size=len(pats))
-        idx = np.concatenate([rows_by_pat[i] for i in pick])
-        yb = y[idx]
-        # Both classes must be present or neither metric is defined. Using ONE
-        # condition for both keeps the AUROC and AUPRC intervals on the same
-        # replicates, so they are paired rather than independently drawn.
-        if yb.min() == yb.max():
-            continue
-        out.append(idx)
-    return out, drawn
+    # Per fold: its rows, its patients, and each patient's rows.
+    per_fold = {}
+    for k in valid_folds:
+        rows_k = np.flatnonzero(fold_h == k)
+        pats, inv = np.unique(groups[rows_k], return_inverse=True)
+        per_fold[k] = (rows_k,
+                       [rows_k[np.flatnonzero(inv == i)] for i in range(len(pats))])
+
+    boots, n_redraw = [], 0
+    for _ in range(n_boot):
+        rep = {}
+        for k in valid_folds:
+            _, rows_by_pat = per_fold[k]
+            n_p = len(rows_by_pat)
+            for attempt in range(max_redraws):
+                pick = rng.integers(0, n_p, size=n_p)
+                idx = np.concatenate([rows_by_pat[i] for i in pick])
+                yb = y[idx]
+                if yb.min() != yb.max():
+                    break
+                n_redraw += 1
+            rep[k] = idx
+        boots.append(rep)
+    return boots, n_redraw
 
 
-_BOOT_CACHE = {}
+def fold_mean_boot(y, score, boots, valid_folds):
+    """Bootstrap distribution of the MEAN-ACROSS-FOLDS metric.
+
+    One value per replicate: the metric on each fold's resampled rows,
+    averaged over folds -- the same shape as the reported point estimate.
+
+    AUROC and AUPRC come from the SAME replicates, so their intervals are
+    paired rather than independently drawn, and two rows scored through this
+    function with the same `boots` can be differenced replicate by replicate.
+    """
+    y = np.asarray(y)
+    score = np.asarray(score, dtype=np.float64)
+    aucs = np.empty(len(boots))
+    aps = np.empty(len(boots))
+    for b, rep in enumerate(boots):
+        a = m = 0.0
+        for k in valid_folds:
+            idx = rep[k]
+            a += roc_auc_score(y[idx], score[idx])
+            m += average_precision_score(y[idx], score[idx])
+        aucs[b] = a / len(valid_folds)
+        aps[b] = m / len(valid_folds)
+    return aucs, aps
 
 
-def pooled_oof_ci(y, oof, groups, n_boot=N_BOOT, seed=BOOTSTRAP_SEED):
-    """Pooled out-of-fold AUROC/AUPRC and their patient-bootstrap 95% CIs.
+def _pct_ci(v):
+    lo, hi = np.percentile(v, [2.5, 97.5])
+    return float(lo), float(hi)
 
-    POOLED IS NOT THE MEAN OF THE FOLD METRICS. mean(AUROC_1..5) asks "how
-    well does this method do on a fold", pooled asks "how well are these 1647
-    admissions ranked". They are different quantities and need not agree.
 
-    The pooled number carries an assumption the fold mean does not: each outer
-    fold selects its OWN wd/lr/epoch and returns RAW LOGITS on its own scale,
-    so pooling ranks fold-A patients against fold-B patients on scales that
-    were never made commensurable. AUROC and AUPRC are rank-based, which makes
-    this well defined but not free -- a fold whose logits happen to sit higher
-    drags its rows up the joint ranking. Standard practice; still an
-    assumption, and it belongs beside the number.
+def pooled_oof_point(y, oof):
+    """Pooled out-of-fold AUROC/AUPRC -- a DIAGNOSTIC, not the headline.
 
-    The interval covers PATIENT SAMPLING ONLY. It says nothing about
-    fold-assignment or hyperparameter-selection variability, which is what
-    auroc_std_fold gestures at. The two are not substitutes and must not be
-    presented as if either covered the other.
+    One metric over all folds' predictions concatenated. It is reported so the
+    cross-fold score block has something to explain, and it is deliberately
+    NOT given a confidence interval: each fold selects its own wd/lr/epoch and
+    returns raw logits on its own scale, so pooling ranks fold-A admissions
+    against fold-B admissions on scales never made commensurable. A fold whose
+    logits happen to sit higher drags its rows up the joint ranking, which
+    depresses the pooled number without any fold discriminating worse.
+
+    Read it beside the per-fold score block below: if a row's pooled value is
+    far under its fold mean while its within-fold positive-negative gap is
+    intact, the gap is a calibration artefact, not evidence about the model.
     """
     y = np.asarray(y)
     oof = np.asarray(oof, dtype=np.float64)
-    groups = np.asarray(groups)
-
-    # Folds skipped by the single-class guard in the outer loop leave NaN
-    # here. They are absent, not zero.
     ok = np.isfinite(oof)
-    r = {'n_oof': int(ok.sum()), 'auroc_oof': np.nan, 'auprc_oof': np.nan,
-         'auroc_ci_low': np.nan, 'auroc_ci_high': np.nan,
-         'auprc_ci_low': np.nan, 'auprc_ci_high': np.nan,
-         'n_boot_valid': 0, 'n_boot_draws': 0}
-    if not ok.any() or len(np.unique(y[ok])) < 2:
-        return r
-
-    yo, so, go = y[ok], oof[ok], groups[ok]
-    r['auroc_oof'] = float(roc_auc_score(yo, so))
-    r['auprc_oof'] = float(average_precision_score(yo, so))
-
-    # The replicates depend only on (y, groups, seed), which are identical for
-    # every model row at one disease x horizon. Caching therefore does two
-    # things: it saves rebuilding the same draws eleven times, and it
-    # GUARANTEES every row is bootstrapped on the same patients -- the
-    # property a later paired delta-AUROC between two rows depends on.
-    ck = (ok.tobytes(), yo.tobytes(), go.tobytes(), n_boot, seed)
-    if ck not in _BOOT_CACHE:
-        _BOOT_CACHE[ck] = _boot_patient_indices(yo, go, n_boot, seed)
-    boots, drawn = _BOOT_CACHE[ck]
-
-    aucs = np.empty(len(boots))
-    aps = np.empty(len(boots))
-    for i, idx in enumerate(boots):
-        aucs[i] = roc_auc_score(yo[idx], so[idx])
-        aps[i] = average_precision_score(yo[idx], so[idx])
-
-    r['n_boot_valid'] = len(boots)
-    r['n_boot_draws'] = drawn
-    if len(boots):
-        lo, hi = np.percentile(aucs, [2.5, 97.5])
-        r['auroc_ci_low'], r['auroc_ci_high'] = float(lo), float(hi)
-        lo, hi = np.percentile(aps, [2.5, 97.5])
-        r['auprc_ci_low'], r['auprc_ci_high'] = float(lo), float(hi)
+    r = {'n_oof': int(ok.sum()), 'auroc_oof': np.nan, 'auprc_oof': np.nan}
+    if ok.any() and len(np.unique(y[ok])) >= 2:
+        r['auroc_oof'] = float(roc_auc_score(y[ok], oof[ok]))
+        r['auprc_oof'] = float(average_precision_score(y[ok], oof[ok]))
     return r
 
 
@@ -476,7 +507,7 @@ def sel_desc(**cols):
 
 
 def torch_linear_cv(X_tr, X_te, y_tr, inner_splits, cands, seed, args,
-                    fixed=None):
+                    fixed=None, surface=None):
     """StandardScaler -> Linear(d,1) -> AdamW, weight decay by inner 3-fold.
 
     The torch counterpart of what a Pipeline([StandardScaler, Logistic]) under
@@ -487,6 +518,13 @@ def torch_linear_cv(X_tr, X_te, y_tr, inner_splits, cands, seed, args,
     fixed=(wd, lr) skips selection entirely and trains the full epoch budget
     with no validation -- the analogue of fitting at a pinned C. Returns
     (test scores, wd, lr, epoch).
+
+    surface, if given a list, receives one dict per CANDIDATE: its mean
+    inner-validation AUROC and its median selected epoch. The selection
+    already computes all of them and keeps only the argmax, so this is the
+    hyperparameter-sensitivity surface at no extra cost. An out-parameter
+    rather than a fifth return value, because four call sites unpack the
+    existing four.
     """
     d = X_tr.shape[1]
     T = lambda z: torch.tensor(z, dtype=torch.float32)
@@ -523,6 +561,8 @@ def torch_linear_cv(X_tr, X_te, y_tr, inner_splits, cands, seed, args,
                 rows.append({'mean': float(np.mean(vas)),
                              'epoch': int(np.median(ee)),
                              'wd': wd_c, 'lr': lr_c})
+        if surface is not None:
+            surface.extend(rows)
         if rows:
             rows.sort(key=lambda r: -r['mean'])
             b = rows[0]
@@ -1146,6 +1186,17 @@ def run_plain(Xa, M, y, groups, folds, gate_input, args, frozen=False):
 # the table whose hyperparameters were chosen inside the nested CV on the
 # same budget the method rows get. A320_untuned_default answers a different
 # question -- what an untuned model does -- and anchors nothing.
+# The paired comparison the results section makes: the gate against the tuned
+# 320-d baseline. Both are scored on identical bootstrap replicates, so their
+# difference is paired and its interval is narrower than asking whether two
+# marginal intervals overlap.
+DELTA_PAIR = ('N_gate_alpha', 'A320_sEHR_pre_selC')
+
+# Rows whose per-fold score distribution is printed. Same two: the question is
+# whether the gate's score SCALE moves across folds more than the baseline's,
+# which would depress its pooled ranking without any fold discriminating worse.
+DIAG_ROWS = ('A320_sEHR_pre_selC', 'N_gate_alpha')
+
 ROW_ORDER = ['A320_sEHR_pre_selC', 'A320_untuned_default',
              'N_mlp_320_128_1', 'N_randproj_frozen',
              'N_probe_on_128',
@@ -1161,6 +1212,11 @@ def main():
     ap_.add_argument('--out-dir', default=reg.OUT_DIR)
     ap_.add_argument('--disease', choices=list(DISEASES) + ['all'],
                      default='all')
+    ap_.add_argument('--n-boot', type=int, default=N_BOOT,
+                     help=f'bootstrap replicates for the confidence intervals '
+                          f'(default {N_BOOT}). Lower it for a quick check; '
+                          f'it changes only the intervals, never a point '
+                          f'estimate or a fitted model.')
     ap_.add_argument('--gate-input', choices=['scalars', 'emb'],
                      default='scalars',
                      help=('unused -- neither row has a gate. Kept only so '
@@ -1385,6 +1441,7 @@ def main():
     diseases = DISEASES if args.disease == 'all' else (args.disease,)
     rows = []
     oof_records = []
+    cell_diag = []
     for disease in diseases:
         print('#' * 100)
         print(f'DISEASE: {disease}')
@@ -1409,22 +1466,33 @@ def main():
             print(f"  {horizon}d usable={len(y)}, pos={int(y.sum())}, "
                   f"censored={int((~usable).sum())}")
 
+            # Rows and their outer-test scores for THIS cell. The confidence
+            # interval cannot be computed per row on the way past, because the
+            # paired difference needs two rows' scores under one replicate --
+            # so rows are collected here and updated in place once the cell is
+            # complete. `rows` holds the same dict objects, so updating them
+            # afterwards updates what reaches the CSV.
+            cell_rows, cell_oof = [], {}
+
             def finish(r):
-                """Attach pooled OOF + bootstrap CI, and bank the predictions.
+                """Bank the predictions and hold the row for the cell-level CI.
 
                 Applied to EVERY row before it is appended, so no row can
-                reach the CSV carrying fold metrics but no pooled ones.
+                reach the CSV without its pooled diagnostic and its interval.
                 """
                 arr = r.pop('_oof', None)
                 if arr is None:
                     return r
-                r.update(pooled_oof_ci(y, arr, g_h))
+                tag = r.get('setting') or r.get('probe')
+                r.update(pooled_oof_point(y, arr))
+                cell_rows.append(r)
+                cell_oof[tag] = arr
                 ok = np.isfinite(arr)
                 if ok.any():
                     k = key_h[ok]
                     oof_records.append(pd.DataFrame({
                         'disease': disease, 'horizon': horizon,
-                        'setting': r.get('setting') or r.get('probe'),
+                        'setting': tag,
                         'dataset': k['dataset'].to_numpy(),
                         'patient_id': k['patient_id'].to_numpy(),
                         'hadm_id': k['hadm_id'].to_numpy(),
@@ -1485,6 +1553,70 @@ def main():
                              n_samples=len(y), n_pos=int(y.sum()))
                     rows.append(finish(r))
 
+            # ── cell-level: fold-preserving CI, paired delta, diagnostic ──
+            # One set of replicates, shared by every row in the cell. Built
+            # from (y, groups, fold_h, seed) only, so it is identical for all
+            # rows -- which is what makes the paired delta below a paired
+            # quantity rather than two independent intervals differenced.
+            scored = [np.isfinite(a) for a in cell_oof.values()]
+            if cell_rows and scored:
+                per_row_folds = {t: set(np.unique(fold_h[np.isfinite(a)]).tolist())
+                                 for t, a in cell_oof.items()}
+                fold_sets = {frozenset(v) for v in per_row_folds.values()}
+                if len(fold_sets) > 1:
+                    # Should be impossible: the skip condition reads only y and
+                    # folds. Say so loudly rather than silently bootstrapping
+                    # different rows on different folds.
+                    print(f"      !! rows disagree on which folds were scored: "
+                          f"{ {t: sorted(v) for t, v in per_row_folds.items()} }")
+                valid_folds = sorted(set.intersection(*per_row_folds.values()))
+
+                boots, n_redraw = _fold_boot_indices(
+                    y, g_h, fold_h, valid_folds, n_boot=args.n_boot)
+                boot_vals = {}
+                for r_ in cell_rows:
+                    tag = r_.get('setting') or r_.get('probe')
+                    a_b, p_b = fold_mean_boot(y, cell_oof[tag], boots,
+                                              valid_folds)
+                    boot_vals[tag] = (a_b, p_b)
+                    lo, hi = _pct_ci(a_b)
+                    r_['auroc_ci_low'], r_['auroc_ci_high'] = lo, hi
+                    lo, hi = _pct_ci(p_b)
+                    r_['auprc_ci_low'], r_['auprc_ci_high'] = lo, hi
+                    r_['n_boot_valid'] = len(boots)
+                    r_['n_fold_redraws'] = n_redraw
+                    r_['n_boot_folds'] = len(valid_folds)
+
+                # ── paired difference, on the SAME replicates ──
+                # Differencing per replicate cancels the fold-to-fold noise the
+                # two rows share, which an overlap test between two marginal
+                # intervals cannot do.
+                if DELTA_PAIR[0] in boot_vals and DELTA_PAIR[1] in boot_vals:
+                    gate, base = DELTA_PAIR
+                    tgt = next(r_ for r_ in cell_rows
+                               if (r_.get('setting') or r_.get('probe')) == gate)
+                    src = next(r_ for r_ in cell_rows
+                               if (r_.get('setting') or r_.get('probe')) == base)
+                    for m, i in (('auroc', 0), ('auprc', 1)):
+                        d_b = boot_vals[gate][i] - boot_vals[base][i]
+                        lo, hi = _pct_ci(d_b)
+                        # Point estimate is the difference of the two REPORTED
+                        # means, not the mean of the bootstrap differences --
+                        # the bootstrap supplies only the interval.
+                        tgt[f'delta_{m}'] = (float(tgt[f'{m}_mean'])
+                                             - float(src[f'{m}_mean']))
+                        tgt[f'delta_{m}_ci_low'] = lo
+                        tgt[f'delta_{m}_ci_high'] = hi
+                    tgt['delta_vs'] = base
+                else:
+                    print(f"      (no paired delta: need both "
+                          f"{DELTA_PAIR[0]} and {DELTA_PAIR[1]} in this cell)")
+
+                cell_diag.append((disease, horizon, valid_folds, n_redraw,
+                                  {t: cell_oof[t] for t in DIAG_ROWS
+                                   if t in cell_oof},
+                                  y.copy(), fold_h.copy()))
+
     res = pd.DataFrame(rows)
 
     print()
@@ -1535,35 +1667,57 @@ def main():
             # columns on the table above: the table's format is what every
             # earlier log used and what the audit file quotes, and widening
             # it would make the two un-diffable.
-            print("      pooled OOF (all 5 outer folds concatenated, ONE "
-                  "metric) with patient-cluster 95% CI:")
-            print(f"        {'row':<22s}{'AUROC_oof':>10s}"
-                  f"{'95% CI':>18s}{'AUPRC_oof':>11s}{'95% CI':>18s}"
-                  f"{'n':>7s}{'boot':>10s}")
+            # POINT ESTIMATE + FOLD-PRESERVING BOOTSTRAP CI. The estimate
+            # is the mean of the five per-fold metrics, unchanged; the
+            # interval resamples patients WITHIN each fold, recomputes that
+            # fold's metric and averages the five, so it is built the same way
+            # the estimate is. A separate block, not extra columns on the
+            # table above, whose format earlier logs and the audit file quote.
+            print("      mean-of-folds estimate with fold-preserving "
+                  "patient-cluster 95% CI:")
+            print(f"        {'row':<22s}{'AUROC':>8s}{'95% CI':>18s}"
+                  f"{'AUPRC':>9s}{'95% CI':>18s}"
+                  f"{'AUROC_oof':>11s}{'boot':>8s}")
             for tag in ROW_ORDER:
                 m_ = sub[sub.setting == tag]
                 if not len(m_):
                     continue
                 q = m_.iloc[0]
-                if not np.isfinite(q.get('auroc_oof', np.nan)):
+                if not np.isfinite(q.get('auroc_ci_low', np.nan)):
                     continue
-                nb = int(q.get('n_boot_valid', 0) or 0)
-                nd = int(q.get('n_boot_draws', 0) or 0)
-                # nd > nb means replicates were rejected for being
-                # single-class; the accepted set is then conditioned on
-                # containing a positive, which narrows the interval.
-                bt = f"{nb}" + (f"/{nd}" if nd > nb else "")
-                # Built outside the f-string: this file runs on Python 3.10
-                # on the cluster, where a replacement field cannot span lines.
+                # Built outside the f-string: this file runs on Python 3.10 on
+                # the cluster, where a replacement field cannot span lines.
                 ci_auc = (f"({q['auroc_ci_low']:.3f}-"
                           f"{q['auroc_ci_high']:.3f})")
                 ci_ap = (f"({q['auprc_ci_low']:.3f}-"
                          f"{q['auprc_ci_high']:.3f})")
-                print(f"        {tag:<22s}{q['auroc_oof']:>10.3f}"
-                      f"{ci_auc:>18s}"
-                      f"{q['auprc_oof']:>11.3f}"
-                      f"{ci_ap:>18s}"
-                      f"{int(q.get('n_oof', 0) or 0):>7d}{bt:>10s}")
+                oof_s = (f"{q['auroc_oof']:.3f}"
+                         if np.isfinite(q.get('auroc_oof', np.nan)) else "-")
+                print(f"        {tag:<22s}{q['auroc_mean']:>8.3f}{ci_auc:>18s}"
+                      f"{q['auprc_mean']:>9.3f}{ci_ap:>18s}"
+                      f"{oof_s:>11s}"
+                      f"{int(q.get('n_boot_valid', 0) or 0):>8d}")
+            nr = sub['n_fold_redraws'].dropna()
+            if len(nr) and int(nr.iloc[0]):
+                print(f"        ({int(nr.iloc[0])} single-class fold draws "
+                      f"redrawn; the accepted replicates are conditioned on "
+                      f"containing a positive, so the interval is optimistic "
+                      f"by an unquantified amount)")
+
+            # PAIRED DIFFERENCE. Same replicates for both rows, differenced
+            # per replicate, so the fold-to-fold noise they share cancels.
+            # This is the comparison to report -- two marginal intervals
+            # overlapping does NOT mean the difference includes zero.
+            g_ = sub[sub.setting == DELTA_PAIR[0]]
+            if len(g_) and np.isfinite(g_.iloc[0].get('delta_auroc', np.nan)):
+                q = g_.iloc[0]
+                for m in ('auroc', 'auprc'):
+                    lo, hi = q[f'delta_{m}_ci_low'], q[f'delta_{m}_ci_high']
+                    excl = "excludes 0" if (lo > 0 or hi < 0) else "includes 0"
+                    print(f"      delta {m.upper()}  "
+                          f"{DELTA_PAIR[0]} - {DELTA_PAIR[1]}  "
+                          f"{q[f'delta_{m}']:+.3f}  "
+                          f"95% CI ({lo:+.3f}, {hi:+.3f})  {excl}")
 
             # WHAT EACH ROW SELECTED, per fold, printed by the row itself.
             # One block per cell listing all nine, because a single shared
@@ -1633,6 +1787,53 @@ def main():
     # The gate mode goes in the FILENAME: without it a scalars run and an
     # emb run of the same disease write the same path, and submitting both
     # as one array has them racing on it.
+    # ── CROSS-FOLD SCORE DIAGNOSTIC ───────────────────────────────────────
+    # Why the pooled number can fall below the fold mean for one row and not
+    # another. Pooling ranks every fold's admissions in one list, so it is
+    # sensitive to each fold's score OFFSET; the fold mean is not, being
+    # rank-based within a fold. If a row's per-fold means swing widely while
+    # its within-fold positive-negative gap holds up, then every fold
+    # separates the classes just as well and only the offset moves -- the
+    # pooled drop is a calibration artefact, not evidence about the model.
+    if cell_diag:
+        print()
+        print('=' * 100)
+        print('CROSS-FOLD SCORE SCALE  (raw outer-test scores, not probabilities)')
+        print('=' * 100)
+        print("  Read the 'mean' column DOWN each row-block: how far the score")
+        print("  offset moves between folds. Then read 'gap' (pos - neg): how")
+        print("  well that fold separates the classes. Large mean spread with")
+        print("  a stable gap = an offset problem, which pooling punishes and")
+        print("  the fold mean ignores.")
+        print()
+        print(f"  {'cell':<12}{'row':<22}{'fold':>5}{'n':>7}{'mean':>9}"
+              f"{'sd':>8}{'pos_mean':>10}{'neg_mean':>10}{'gap':>8}")
+        for disease, horizon, valid_folds, n_redraw, oofs, y_c, fold_c in cell_diag:
+            for tag in DIAG_ROWS:
+                arr = oofs.get(tag)
+                if arr is None:
+                    continue
+                spread = []
+                for k in valid_folds:
+                    m = (fold_c == k) & np.isfinite(arr)
+                    if not m.any():
+                        continue
+                    v = arr[m]
+                    yk = y_c[m]
+                    pos = v[yk == 1]
+                    neg = v[yk == 0]
+                    pm = float(pos.mean()) if len(pos) else np.nan
+                    nm = float(neg.mean()) if len(neg) else np.nan
+                    spread.append(float(v.mean()))
+                    cell = f"{disease} {horizon}d"
+                    print(f"  {cell:<12}{tag:<22}{k:>5}{int(m.sum()):>7}"
+                          f"{v.mean():>9.3f}{v.std():>8.3f}"
+                          f"{pm:>10.3f}{nm:>10.3f}{pm - nm:>8.3f}")
+                if len(spread) > 1:
+                    print(f"  {'':<12}{'':<22}{'across folds: sd(mean) = '}"
+                          f"{np.std(spread):.3f}")
+            print()
+
     tag_out = (('' if args.alpha_gate == 'scalars' else '_embgate')
                + ('' if args.disease == 'all' else f'_{args.disease}'))
     os.makedirs(args.out_dir, exist_ok=True)
