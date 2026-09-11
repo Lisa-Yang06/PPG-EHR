@@ -215,11 +215,10 @@ LR_GRID = [3e-3, 1e-2]
 # gate loses to a fixed alpha" was not separable from "the gate was never
 # allowed to stop varying".
 #
-# HOW FAR THE GRID HAS TO REACH -- measured on THIS gate, not borrowed.
-# An earlier version of this comment justified a top of 10 with numbers taken
-# from score_fusion.py's gate (4 inputs, lr=0.05, zero-init). That transfer was
-# wrong: this gate has 261 inputs, lr from [3e-3, 1e-2] and default random
-# init, and all three differences push the same way. Re-measuring the gate
+# HOW FAR THE GRID HAS TO REACH -- measured on THIS gate, not borrowed. A
+# ceiling taken from the small scalars-only gate in score_fusion.py does not
+# transfer: this gate has 261 inputs, a different rate and default random
+# init, and all three differences push the same way. Measuring the gate
 # weight norm and the spread of alpha against wd on this gate showed both
 # falling monotonically across the grid: at the old top value alpha still
 # varies over its full range, and it takes two more decades before alpha is
@@ -239,9 +238,9 @@ LR_GRID = [3e-3, 1e-2]
 # the degenerate endpoint exists in the grid even though wd=100 alone does not
 # flatten it at lr=3e-3.
 #
-# Zero-initialising the gate does NOT substitute for this: measured at wd=10
-# with zero init, alpha sd is still 0.272, because the gradient pushes the
-# weights up regardless of where they start.
+# Zero-initialising the gate does NOT substitute for this: measured at the old
+# grid top with zero init, alpha still varies over its full range, because the
+# gradient pushes the weights up regardless of where they start.
 # 30 is not decorative. The measured transition from "alpha varies fully" to
 # "alpha is constant" happens ENTIRELY between 10 and 100, and a decade grid
 # puts nothing inside it -- forcing the selection into a binary choice when the
@@ -658,7 +657,8 @@ def _split_param_groups(model, wd, gate_wd_fix, wd_head=None):
     # penalty at all: decoupled decay shrinks by (1 - lr*wd) per step, so the
     # whole run removes a negligible fraction of the weight norm. The sklearn
     # head that outperforms it selects a C whose penalty coefficient 1/(2C) is
-    # orders of magnitude larger. Pinning it was the bug.
+    # orders of magnitude larger, so pinning this axis is not a neutral
+    # default -- it removes the head's penalty.
     hw = [p for n, p in model.head.named_parameters() if not n.endswith('bias')]
     hb = [p for n, p in model.head.named_parameters() if n.endswith('bias')]
     return [
@@ -961,11 +961,11 @@ def run_setting4(
     # differs in one thing only: the classifier on top of the fused vector is
     # the L2 logistic with C chosen by inner CV that settings 1/2/3 all use,
     # instead of the torch head trained at a fixed wd with early stopping.
-    # Setting 4 has come in below setting 3 in every run so far, and run 6383
-    # sharpened it -- the alpha sweep at 0.50 scored 0.825 while setting 4, at
-    # a learned alpha averaging 0.51, scored 0.743. Same mixing weight, 0.08
-    # apart. This row says whether that gap is the head or the per-admission
-    # variation in alpha, which no existing row can separate.
+    # Setting 4 has come in below setting 3 in every run so far, and a fixed
+    # alpha sweep evaluated AT the mixing weight setting 4 learned scored well
+    # above it -- same weight, different head. This row says whether that gap
+    # is the head or the per-admission variation in alpha, which no existing
+    # row can separate.
     per_h4b = {h: {'te': [], 'ap': [], 'C': []} for h in HORIZONS}
     # Setting 4's OWN endpoints, scored as AUROC. s0/s1 are already computed
     # for the case-level ranks; only the scoring is new, so this costs nothing.
@@ -983,9 +983,9 @@ def run_setting4(
     # a weight vector applied to a block it was not optimised for, while 0e
     # gets a probe fitted to that block with C selected by inner CV. 4e0 sits
     # BELOW 0e by construction, and the gap widens as alpha moves away from 0
-    # (at alpha ~ 0.5, w is a compromise between two different blocks). An
-    # earlier note here read 4e0 against 0e as if the two were commensurable;
-    # they are not. What 4e0 supports is the comparison
+    # (at alpha ~ 0.5, w is a compromise between two different blocks). The
+    # two are not commensurable and must not be read against each other.
+    # What 4e0 supports is the comparison
     # 4e0-in-this-run vs 4e0-in-another-run, and 4e0 vs 4e1 within a run.
     per_hE = {h: {'a0': [], 'a1': []} for h in HORIZONS}
     es_flags, cases = [], []
@@ -1041,9 +1041,9 @@ def run_setting4(
             # and the variance ordering that makes PCA work is destroyed.
             #
             # Two synthetic checks failed to reproduce this, once at the
-            # default C and once with C selected by CV, so the effect was
-            # dismissed twice before the real data settled it. Synthetic
-            # spectra were evidently far flatter than these embeddings'.
+            # default C and once with C selected by CV -- synthetic spectra
+            # are evidently far flatter than these embeddings', so a synthetic
+            # null here is not evidence of absence.
             #
             # Instead the block is divided by sqrt(mean eigenvalue), a SINGLE
             # scalar. Relative variance WITHIN the block is untouched, and the
@@ -1634,10 +1634,9 @@ def main():
             all_rows.append(r0e)
 
             # ── 0g: 0e's twin, WHITENED. The only difference. ──
-            # SETTLED, and kept as the evidence. When --ehr-source pca still
-            # whitened, setting 4 came in well below 0e; this row isolated
-            # why. 0g lost to 0e in every cell, so whitening alone accounted
-            # for the deficit and the pca path dropped it (9e57035).
+            # This row is why the pca path does not whiten. With whitening,
+            # setting 4 came in well below 0e, and 0g lost to 0e in every
+            # cell -- so whitening alone accounted for the deficit.
             #
             # Mechanism: whitening rescales every component to unit variance,
             # so a single L2 penalty no longer protects the high-variance

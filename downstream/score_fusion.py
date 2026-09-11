@@ -634,10 +634,10 @@ def run_cell(Xe, Xp, Xpp, Xep, M, y, groups, folds, args):
         sep_te, _, sel_ep = base_tower(Xep[tr], Xep[te], y[tr], sp_in, cands,
                                        seed, args,
                                        surface=_grab('expert', 'sEHR_post'))
-        # Each selection carries its OWN tower name. The order used to be
-        # duplicated in the print caption, and the caption drifted out of
-        # step with this tuple -- attributing every tower's hyperparameters
-        # to the wrong model. A name cannot drift from the value beside it.
+        # Each selection carries its OWN tower name. Duplicating the order
+        # in the print caption instead lets the caption drift out of step
+        # with this tuple and attribute every tower's hyperparameters to the
+        # wrong model. A name cannot drift from the value beside it.
         sels.append((('E', sel_e), ('P', sel_p), ('J', sel_j),
                      ('PPGpre', sel_pp), ('sEHRpost', sel_ep)))
 

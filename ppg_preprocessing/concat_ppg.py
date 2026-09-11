@@ -20,18 +20,14 @@ The `segment` field of a chained row is the joined names of its parts --
 "3238451_0002+3238451_0003+..." -- so a `+` in that column is proof this stage
 ran, and its absence on a multi-segment record is proof it did not.
 
-THE III ENTRY POINT IS RECONSTRUCTED, NOT RECOVERED
----------------------------------------------------
-The research code had only the IV branch below; the III shards were produced
-by editing its paths by hand between runs, and that edit was never committed.
-`--cohort III` reconstructs that step from the surviving evidence: the output
-filenames ppg_parquet_per_patient.py reads, and the chained `+` names in the
-files it produced. It calls the SAME combine_continuous_segments the IV branch
-calls, so the transformation is identical -- only the output shape differs.
+THE III BRANCH IS NOT VALIDATED
+-------------------------------
+`--cohort III` calls the SAME combine_continuous_segments the IV branch calls,
+so the transformation is identical and only the output shape differs.
 
-It has not been checked against the original III shards, which no longer
-exist. Anyone reproducing MIMIC-III from raw waveforms should treat this stage
-as the one to verify first.
+It has not been checked against the MIMIC-III shards the published results
+were built from, which no longer exist. Anyone reproducing MIMIC-III from raw
+waveforms should treat this stage as the one to verify first.
 
 Usage:
     python concat_ppg.py --cohort IV  --raw <raw_IV.parquet>

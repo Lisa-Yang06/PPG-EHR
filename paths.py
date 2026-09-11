@@ -2,11 +2,10 @@
 
 WHY THIS FILE EXISTS
 --------------------
-The research version of this code carried 164 distinct absolute paths, all
-descending from one researcher's cluster account. None of them exist on anyone
-else's machine, so nothing ran anywhere else. Every one of those literals is
-now expressed as a root from the environment plus a relative sub-path, and the
-roots are declared here so there is exactly one place to look.
+Absolute paths belong in the environment, not in source: one machine's layout
+is not another's. Every path that leaves this repository is a root read from
+the environment plus a relative sub-path, and the roots are declared here, so
+there is exactly one place to look and one place to change.
 
 THE FOUR ROOTS
 --------------
@@ -130,16 +129,15 @@ def add_papagei_to_path():
 def configure_caches():
     """Opt-in cluster cache redirection. Does NOTHING unless PPG_CACHE_ROOT is set.
 
-    The research code set HOME, XDG_CACHE_HOME and MPLCONFIGDIR unconditionally
-    to a scratch directory, because the cluster's real home was too small for
-    matplotlib's font cache. Twenty-eight files reassigned HOME outright.
+    On a cluster whose real home directory is too small or read-only, library
+    caches -- matplotlib's font cache above all -- have to go somewhere
+    writable. Reassigning HOME is the obvious way to do that and a harmful
+    one: HOME also decides where every downstream library looks for
+    credentials and configuration.
 
-    That is correct on that cluster and actively harmful anywhere else --
-    silently repointing HOME changes where every downstream library looks for
-    credentials, configuration and caches. So it is opt-in: set PPG_CACHE_ROOT
-    only if you actually need it, and note that HOME is deliberately NOT
-    reassigned here even then. Only the two cache variables are, which is what
-    the original hack was really for.
+    So this is opt-in, it never touches HOME even when enabled, and it sets
+    only the two cache variables that are the actual problem. A machine with a
+    usable home directory needs none of it.
     """
     root = cache_root()
     if root is None:

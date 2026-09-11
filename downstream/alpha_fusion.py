@@ -165,7 +165,7 @@ ALPHA_GRID = [round(0.05 * i, 2) for i in range(21)]
 # module is imported for its optimizer, not run, so gated_fusion.py's own runs
 # are unaffected -- but the override is loud in the header for exactly that
 # reason.
-# 300, not the 2000 an earlier draft proposed. The head's only real
+# 300 steps, not more. The head's only real
 # regulariser today is the step budget plus early stopping -- pinned at
 # wd=1e-4 the decoupled decay removes 1e-4 of its norm over a whole run --
 # so raising the budget without also giving the head a selected decay would
@@ -1147,8 +1147,9 @@ def main():
                     help=('decays for the adapter weights, searched jointly '
                           'with the rest. Defaults to WD_GRID, the SAME grid '
                           'the gate and head use -- see the comment on '
-                          'WD_GRID for why the old 1..100 split was an '
-                          'assumption rather than a result. Still a separate '
+                          'WD_GRID for why a separate, wider grid on this '
+                          'axis would be an assumption rather than a result. '
+                          'Still a separate '
                           'flag, because the adapter is the one encoder here '
                           'that CAN be driven to zero (the model then falls '
                           'back on the frozen aligned vector), so if it pins '
@@ -1202,8 +1203,8 @@ def main():
     ap.add_argument('--skip-e', action='store_true',
                     help=('skip E_learned_alpha and E_sklearnhead. They are '
                           'the only expensive base rows (~12 min of the ~16) '
-                          'and their result is settled: negative against A320 '
-                          'in every run. Their sEHR side is PCA-128 of '
+                          'and they do not beat A320. Their sEHR side is '
+                          'PCA-128 of '
                           'v_ehr_pre and shares nothing with the adapter '
                           'rows, so dropping them changes no other number. '
                           'OFF by default so an unflagged run still '
@@ -1453,10 +1454,10 @@ def main():
 
     # ── what got selected, and whether the grid was wide enough ──
     # An axis pinned to a grid edge in EVERY fold does not mean that value is
-    # right; it means the search wanted to keep going. gated_fusion took the
-    # largest lr on offer in nearly every fold and nobody noticed, which is how
-    # an undertrained head survived several rounds of analysis. These are
-    # diagnostics only -- none of them feeds back into the grid automatically.
+    # right; it means the search wanted to keep going, and an undertrained
+    # model can look like a weak one for several rounds before anyone checks.
+    # These are diagnostics only -- none of them feeds back into the grid
+    # automatically.
     # Skipped entirely when --skip-e removed the only rows it describes,
     # rather than printing a header over nothing.
     if not args.skip_e:

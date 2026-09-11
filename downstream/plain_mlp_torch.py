@@ -1097,8 +1097,9 @@ def run_plain(Xa, M, y, groups, folds, gate_input, args, frozen=False):
             'coef_ehr_per_fold': '', 'coef_ppg_per_fold': '',
             'coef_ehr_mean': np.nan, 'coef_ppg_mean': np.nan,
             # Describes the MLP / frozen-control row, the only one that writes
-            # sel/eps/was. Every other row OVERRIDES this through extra with
-            # its own -- silently inheriting it is the bug this replaced.
+            # sel/eps/was. Every other row must OVERRIDE this through extra
+            # with its own; inheriting it silently mislabels that row's
+            # hyperparameters.
             'sel_desc': sel_desc(
                 **({'wd': [q[1] for q in sv_mlp]} if frozen else
                    {'wd_proj': [q[0] for q in sv_mlp],
@@ -1136,8 +1137,7 @@ def run_plain(Xa, M, y, groups, folds, gate_input, args, frozen=False):
             # coefficient from patient to patient.
             'alpha_std_within': float(np.mean(a['sd'])) if a['sd'] else np.nan,
             # ACROSS-fold spread of the per-fold means: whether the inner CV
-            # identifies the mixing weight at all. In every earlier run of
-            # this project it did not.
+            # identifies the mixing weight at all.
             'alpha_std_across': float(np.std(a['cp'])) if a['cp'] else np.nan,
             'sel_desc': sel_desc(wd_gate=[q[0] for q in a['sel']],
                                  wd_head=[q[1] for q in a['sel']],
@@ -1233,15 +1233,13 @@ def main():
                           'WD_HEAD_GRID and is searched jointly with this).')
     ap_.add_argument('--lr', default='0.001,0.003,0.01,0.03',
                      help=('comma-separated rates, SEARCHED jointly with the '
-                           'two decays. A single value pins it, which is what '
-                           'this defaulted to before: one rate, chosen by '
-                           'hand because rho = lr*wd caps the reachable decay '
-                           'and only a small enough rate lets the decay grid '
-                           'reach its top value. That was a hand-picked value '
-                           'defended by a cross-run comparison of outer-fold '
-                           'results, which is selection on the test folds and '
-                           'cannot go in a methods section. Searching it puts '
-                           'the choice back inside the nested CV. The lowest '
+                           'two decays inside the nested CV. A single value '
+                           'pins it instead, which is only defensible if the '
+                           'rate is not a quantity being selected: rho = '
+                           'lr*wd caps the reachable decay, so pinning the '
+                           'rate also decides which decays the grid can '
+                           'reach, and that is a modelling choice hiding in '
+                           'an optimisation flag. The lowest '
                            'rate is included because every signal so far '
                            'points DOWN -- the decays pin to the top of their '
                            'grid and the early stop fires in the first few '

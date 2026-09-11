@@ -8,10 +8,9 @@ Stage 3 of the sEHR side, run once per cohort:
 
 WHY --cohort EXISTS
 -------------------
-The research code hardcoded the MIMIC-III directory and was edited by hand to
-produce the MIMIC-IV files; that edit was never committed. The filter itself
-never depended on the cohort -- same threshold, same columns -- so the cohort is
-a directory argument here and nothing else changes between the two runs.
+The filter does not depend on the cohort -- same threshold, same columns, same
+output names -- so the cohort is a directory argument and nothing else changes
+between the two runs.
 
 Usage:
     python keep_50.py --cohort III

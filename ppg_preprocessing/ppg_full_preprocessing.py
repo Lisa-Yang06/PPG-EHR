@@ -57,8 +57,7 @@ if _ROOT not in sys.path:
 import paths
 
 # Redirects library caches only when PPG_CACHE_ROOT is set, and never
-# reassigns HOME. The research version set HOME unconditionally to a scratch
-# directory, which on any other machine repoints where every library looks for
+# reassigns HOME -- HOME also decides where every library looks for
 # credentials and configuration.
 paths.configure_caches()
 

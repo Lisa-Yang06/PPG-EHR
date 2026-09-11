@@ -182,10 +182,9 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     root = args.waveform_dir
-    # Named _IV here. The research version wrote a bare relative
-    # "ppg_segments_raw.parquet" into the working directory, while the next
-    # stage read "ppg_segments_raw_IV.parquet" -- the rename between them was
-    # manual and undocumented, so the chain only worked by hand.
+    # The cohort is in the output filename, and the path is absolute: the
+    # next stage reads this file by that name, and MIMIC-III's shards sit
+    # beside it under the same root.
     out_path = args.out or (paths.data_root() / "ppg_segments_raw_IV.parquet")
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -207,8 +206,6 @@ if __name__ == "__main__":
     if not results:
         raise SystemExit("no PPG segments extracted.")
 
-    # One write. The research version wrote the same frame twice through a
-    # duplicated branch.
     df = pd.DataFrame(results)
     print(f"Extracted {len(df)} raw PPG segments across "
           f"{df['patient_id'].nunique()} patients.")

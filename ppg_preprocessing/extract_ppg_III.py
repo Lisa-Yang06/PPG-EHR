@@ -186,10 +186,9 @@ if __name__ == "__main__":
     out_dir = args.out_dir or paths.data_root()
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # The research version hard-coded `if p_dir.name != "p09": continue` and
-    # was edited between runs to sweep the ten groups. Left in, it would make
-    # this script silently process a tenth of MIMIC-III and exit 0 -- the
-    # failure mode that costs a day to notice. Group selection is now explicit.
+    # Group selection is explicit, and defaults to every group present. A
+    # default that covered one group would make this script process a tenth of
+    # MIMIC-III and exit 0 -- the failure mode that costs a day to notice.
     all_groups = sorted(p.name for p in root.glob("p0?") if p.is_dir())
     if not all_groups:
         raise SystemExit(
