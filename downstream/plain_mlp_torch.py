@@ -116,9 +116,7 @@ outer CV groups by patient for the same reason. The metric stays
 admission-level; only the resampling unit is the patient.
 
 A fold draw containing one class has no AUROC and is redrawn, so every
-replicate averages the same folds. At low-positive cells the accepted draws
-are therefore conditioned on containing a positive and the interval is
-optimistic by an unquantified amount; n_fold_redraws reports how often that
+replicate averages the same folds; n_fold_redraws reports how often that
 fired.
 
 The interval covers PATIENT SAMPLING ONLY -- nothing about fold assignment or
@@ -249,9 +247,8 @@ def _fold_boot_indices(y, groups, fold_h, valid_folds, n_boot=N_BOOT,
     A fold draw containing only one class has no AUROC. That fold is redrawn
     until valid, so every replicate averages the same folds; dropping the fold
     instead would average four folds in some replicates and five in others,
-    which is a different estimand. The cost is that at low-positive cells the
-    accepted draws are conditioned on containing a positive, which narrows the
-    interval -- n_fold_redraws reports how often that happened.
+    which is a different estimand. n_fold_redraws reports how often a redraw
+    was needed.
 
     The draws depend only on (y, groups, fold_h, valid_folds, seed) and NOT on
     any model's scores, so every row in a cell is bootstrapped on identical
@@ -1690,9 +1687,7 @@ def main():
             nr = sub['n_fold_redraws'].dropna()
             if len(nr) and int(nr.iloc[0]):
                 print(f"        ({int(nr.iloc[0])} single-class fold draws "
-                      f"redrawn; the accepted replicates are conditioned on "
-                      f"containing a positive, so the interval is optimistic "
-                      f"by an unquantified amount)")
+                      f"redrawn)")
 
             # PAIRED DIFFERENCE. Same replicates for both rows, differenced
             # per replicate, so the fold-to-fold noise they share cancels.

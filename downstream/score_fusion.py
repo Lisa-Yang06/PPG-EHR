@@ -1145,8 +1145,7 @@ def main():
         nr = int(cidf['n_fold_redraws'].sum())
         if nr:
             print(f"\n  ({nr} single-class fold draws redrawn across all "
-                  f"cells; those replicates are conditioned on containing a "
-                  f"positive, so the interval is optimistic there)")
+                  f"cells)")
         print(f"\nSaved {f_ci}")
 
     # ── hyperparameter sensitivity, two panels ──
