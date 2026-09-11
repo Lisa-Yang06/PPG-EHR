@@ -20,10 +20,9 @@ Three findings drive this design, none of them speculative:
      that to the limit: C_EHR and C_PPG are two independent hyperparameters,
      each selected on its own modality's inner CV.
 
-  3. The learned gate was the worst setting in both gated_fusion runs, at a
-     parameter count the positive counts could not support. Mixing two
-     scalars needs no 128-d head, so the gate here is far smaller -- a
-     k -> 8 -> 1 MLP on the scalars, printed at startup.
+  3. A 128-d gate head is more parameters than these positive counts
+     support. Mixing two scalars needs no such head, so the gate here is far
+     smaller -- a k -> 8 -> 1 MLP on the scalars, printed at startup.
 
 A fourth reason is structural. The embedding-level mixer computes
 w'[(1-a)v_e + a v_p], one shared w, which forces both modalities onto the
@@ -39,7 +38,8 @@ in-sample predictions. In sample both towers score far above their test
 values, and the sEHR tower inflates more, because it has 320 columns to
 memorise with and PPG has 128. A combiner fed those pairs concludes "trust
 sEHR almost entirely" for a reason that is about column count, not
-information. Out-of-fold scores are honest, so the learned weight is too.
+information. Out-of-fold scores remove that inflation, so the learned weight
+reflects information rather than input width.
 
 KNOWN CAVEATS, both inherited from stacking_fusion.py
 -----------------------------------------------------
@@ -454,8 +454,8 @@ def select_gate(S_raw, M_raw, y, groups, cands, args, seed, use_logits=False,
     scaler on each inner-TRAINING subset. Standardising the whole outer-train
     block first and splitting afterwards would let the inner-validation rows
     contribute to the mean and variance the selection is then read off, which
-    is the leak plain_mlp_torch avoids by refitting the scaler inside every
-    inner split. The refit that follows selection uses the outer-train scaler,
+    is why plain_mlp_torch also refits the scaler inside every inner split.
+    The refit that follows selection uses the outer-train scaler,
     which is correct: those rows are all training data by then.
 
     Selected rather than pinned so the gate and the fixed alpha it is measured

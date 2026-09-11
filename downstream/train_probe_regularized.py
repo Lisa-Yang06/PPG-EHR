@@ -28,7 +28,8 @@ WHAT IS REPORTED
   memorised and the test number means nothing; this must be visible.
 - chosen C per fold (median), so over/under-regularisation is diagnosable.
 - a SHUFFLED-LABEL control per row: labels permuted across samples, whole CV
-  re-run. An honest pipeline gives ~0.5 here. If it does not, the leak is in
+  re-run. A correctly wired pipeline gives ~0.5 here. If it does not, the
+  leak is in
   the harness, not the features.
 
 POPULATION
@@ -430,7 +431,7 @@ def main():
     print("=" * 92)
     print("  TRAIN ~ 1.000            -> still memorising; C grid needs to go lower")
     print("  shuffled far from 0.500  -> leak in the harness, not a real signal")
-    print("  TEST < 0.5 with TRAIN<1  -> genuinely anti-predictive, worth chasing")
+    print("  TEST < 0.5 with TRAIN<1  -> genuinely anti-predictive")
     print("  wide C spread per fold   -> too few positives to select C; treat all")
     print("                              numbers on that row as indicative only")
 

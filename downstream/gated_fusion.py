@@ -226,8 +226,8 @@ LR_GRID = [3e-3, 1e-2]
 #
 # Adam's update size is gradient-magnitude independent, so decay and gradient
 # balance at ||w|| ~ sqrt(n_gate_inputs) / wd. The measured norms follow that
-# relation -- which is why a value tuned on a 4-input gate is
-# meaningless here.
+# relation -- which is why a value tuned on a 4-input gate does not
+# transfer to this one.
 #
 # STABILITY CEILING: decoupled decay is p <- p * (1 - lr*wd), so |1-lr*wd| > 1
 # once lr*wd > 2 and the weights blow up. That is exactly the wd=1000 NaN
@@ -241,7 +241,8 @@ LR_GRID = [3e-3, 1e-2]
 # Zero-initialising the gate does NOT substitute for this: measured at the old
 # grid top with zero init, alpha still varies over its full range, because the
 # gradient pushes the weights up regardless of where they start.
-# 30 is not decorative. The measured transition from "alpha varies fully" to
+# 30 is included deliberately. The measured transition from "alpha varies
+# fully" to
 # "alpha is constant" happens ENTIRELY between 10 and 100, and a decade grid
 # puts nothing inside it -- forcing the selection into a binary choice when the
 # useful answer may be an intermediate amount of adaptivity. 300 is left out:
@@ -1673,11 +1674,11 @@ def main():
 
             # ── manual alpha sweep: one full CV per grid point ──
             # Every point here is scored on the OUTER test fold, so the best
-            # of them is the maximum of 21 noisy numbers and nobody could have
-            # selected it without looking at the test set. It answers "could
-            # any fixed mixing weight beat the pre-alignment baselines", which
-            # is an upper bound, not a deployable result. Setting 3 above is
-            # the deployable version of the same question.
+            # of them is a maximum over the grid rather than a selectable
+            # configuration. It answers "could any fixed mixing weight beat
+            # the pre-alignment baselines", which is an upper bound, not a
+            # deployable result. Setting 3 above is the deployable version of
+            # the same question.
             for a in SWEEP_ALPHA_GRID:
                 rs = reg.run_cv(
                     np.hstack([VE_fus_h, VP_h]),
@@ -1807,7 +1808,8 @@ def main():
                 (res.horizon == horizon)
             ]
             # The 21 sweep rows all abbreviate to 'S' and would print 21
-            # identical entries, burying the settings anyone reads. They are
+            # identical entries, crowding out the settings that are read.
+            # They are
             # still CHECKED -- uniq is taken over every row -- just collapsed
             # to one column in the display.
             counts = {
@@ -1862,8 +1864,8 @@ def main():
         print("    Selected on the inner split, never on the outer test fold. A")
         print("    grid-edge winner in every fold means the grid should be widened")
         print("    in that direction; a value that jumps between folds means the")
-        print("    inner split cannot identify it and the gate's regularisation is")
-        print("    effectively arbitrary.")
+        print("    inner split cannot identify it, and the selected value")
+        print("    should be read as unidentified rather than as a result.")
         if r4['folds_without_earlystop']:
             print(
                 f" !! {int(r4['folds_without_earlystop'])} fold(s) had too "

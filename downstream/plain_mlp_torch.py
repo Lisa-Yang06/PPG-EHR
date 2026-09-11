@@ -9,16 +9,11 @@ LogisticRegression under GridSearchCV.
 WHY
 ---
 plain_mlp.py mixes two frameworks, so every "fusion vs baseline" difference
-in it carries a framework difference as well. Two numbers from its last run
-show the size of that:
-
-    N_probe(sklearn convex solve) - N_mlp(AdamW)   -0.0031   3/12
-    N_probe_on_128 - A320_selC (both sklearn)      -0.0111   0/12
-
-The second is optimiser-matched, so "a learned 128-d loses to the raw 320-d"
-survives. The rest of that table does not have the same protection. Here
-every row is on one framework and one grid, so a difference is a difference
-of representation or of fusion form and nothing else.
+in it carries a framework difference as well, and on its last run that
+framework difference was the same order as the representation differences
+being compared. Here every row is on one framework and one grid, so a
+difference is a difference of representation or of fusion form and nothing
+else.
 
 Row for row against plain_mlp.py's CSV, the gap IS the framework effect.
 
@@ -427,7 +422,8 @@ class AlphaOnFrozen(nn.Module):
     Both are put through the same per-coordinate StandardScaler before
     mixing, so each block has expected squared norm equal to its width and
     neither swamps the other. h carries whatever scale training left it at
-    and zp has unit norm, so without this alpha would again be meaningless.
+    and zp has unit norm, so without this alpha would not be a block-level
+    weight.
     """
 
     def __init__(self, dim, gate_in_dim, alpha_fixed=None, mode='convex'):
@@ -805,7 +801,8 @@ def run_plain(Xa, M, y, groups, folds, gate_input, args, frozen=False):
         if best is None:
             # Same fallback as run_linear / run_adapter, and the same caveat:
             # these values are NOT on any searched grid, so a fold that takes
-            # this branch ran a configuration nobody chose. Count it.
+            # this branch ran a configuration that was not on the grid.
+            # Count it.
             n_no_sel += 1
             wh, lr, ep = gf.DEFAULT_WD, gf.DEFAULT_LR, args.epochs
             wp = args.wd_proj[-1]
@@ -1284,16 +1281,10 @@ def main():
                      help=("torch.optim.AdamW's OWN default weight decay. "
                            'This row answers one question -- what do you get '
                            'without tuning -- so the value has to be the '
-                           'library default or it answers a different one. It '
-                           'was 30 before, defended by lambda = 1/(2Cn) at '
-                           'DEFAULT_C and by 30 being the modal decay the '
-                           'searched rows picked. The second is selection on '
-                           'outer-fold results; the first traces back to '
-                           'DEFAULT_C, itself set as the "plateau of the '
-                           'table above". Both are hindsight. The library '
-                           'default is the only value nobody chose by looking '
-                           'at this data, and its being weak is the answer, '
-                           'not a problem with it.'))
+                           'library default or it answers a different one. Any '
+                           'other value would be picked with this dataset in '
+                           'view, which makes it a tuned row; the tuned '
+                           'baseline is reported separately.'))
     ap_.add_argument('--lr-a320', type=float, default=1e-3,
                      help=("torch.optim.AdamW's OWN default learning rate. "
                            'rho = lr*wd = 1e-5, far under MAX_RHO. The row '
@@ -1861,7 +1852,7 @@ def main():
     print('             untuned baseline inflates it, which is the whole '
           'reason that row')
     print('             uses the library default instead of a value picked '
-          'with hindsight.')
+          'with this dataset in view.')
     print('  N_mlp - N_randproj : did TRAINING the projection buy anything? '
           'Same')
     print('             architecture, same init, same folds; only whether P '

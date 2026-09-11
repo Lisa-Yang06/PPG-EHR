@@ -94,7 +94,8 @@ PPG_DIR = {'III': str(paths.data_root() / "MIMIC_III_ppg_filtered_by_patient"),
            'IV':  str(paths.data_root() / "MIMIC_IV_ppg_filtered_by_patient")}
 OUT_DIR = str(paths.data_root() / "ds1")
 
-# these must match stage 4 exactly or the reproduced selection is meaningless
+# these must match stage 4 exactly or the reproduced selection is not the
+# same selection
 PPG_PARQUET = "ppg.parquet"
 SIGNAL_COL = "signal"
 N_WINDOWS_PER_SEG = 60

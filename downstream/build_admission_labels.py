@@ -52,7 +52,7 @@ number materially, the expensive stage should not be started.
 WHAT IS NOT HANDLED
 -------------------
 Loss to follow-up: an admission whose patient has no coded activity after
-dischtime + N is scored 0, though the honest answer is "not observed". MIMIC
+dischtime + N is scored 0, though the correct answer is "not observed". MIMIC
 has no follow-up-end field. The effect is one-directional -- 0s at long
 horizons are contaminated, so positive rates there are underestimates, more so
 for patients who rarely present.

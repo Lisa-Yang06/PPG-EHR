@@ -83,8 +83,8 @@ coefficients against 42-124 training positives, and the same function is
 penalised differently in the two models (L2 costs ((1-a)^2 + a^2)||w||^2 there
 against ||w||^2 here), so C_concat scoring BELOW D_fixed_alpha is entirely
 possible and is itself the finding: the constraint is buying generalisation.
-Read it the other way too -- if C_concat beats E, the honest recommendation is
-plain concatenation and the gate buys nothing. Either way it has to be
+Read it the other way too -- if C_concat beats E, the recommendation is plain
+concatenation and the gate buys nothing. Either way it has to be
 measured before the gate is proposed, not after.
 
 D_fixed_alpha is the control that isolates the LEARNING. E and D mix the same
@@ -163,7 +163,7 @@ ALPHA_GRID = [round(0.05 * i, 2) for i in range(21)]
 #
 # These override gated_fusion's module globals for THIS PROCESS ONLY. That
 # module is imported for its optimizer, not run, so gated_fusion.py's own runs
-# are unaffected -- but the override is loud in the header for exactly that
+# are unaffected -- and the override is stated in the header for that
 # reason.
 # 300 steps, not more. The head's only real
 # regulariser today is the step budget plus early stopping -- pinned at
@@ -336,7 +336,7 @@ def select_C(F_tr, y_tr, g_tr):
 # a correction off, it erases the representation. Keeping the encoder axis
 # two decades above the head axis was therefore an assumption, not a result.
 #
-# 30 is the ceiling, not 100, and the constraint is rho, not taste. The guard
+# 30 is the ceiling, not 100, and the constraint is rho. The guard
 # is lr*wd <= MAX_RHO with each group's OWN lr: head and gate run at 0.01 so
 # they stop at 30, the encoder runs at 0.003 so it could reach 100. A shared
 # grid ending at 100 would be reachable by the encoder and not by the head --
@@ -519,8 +519,8 @@ def run_learned_alpha(X, M, y, groups, folds, gate_input, args):
             wd_g, wd_h, lr, ep = (best['wd_gate'], best['wd_head'],
                                   best['lr'], best['epoch'])
             # How separable were the candidates at all? If the top of the
-            # ranking is inside the fold-to-fold spread, "we selected
-            # wd_gate=1" is not a finding, it is a coin flip.
+            # ranking sits inside the fold-to-fold spread, the selected value
+            # is not identified by the data.
             if len(rows) > 2:
                 gap_top.append(rows[0]['mean'] - rows[2]['mean'])
         sel.append((wd_g, wd_h, lr))
@@ -674,8 +674,8 @@ def oof_alpha(X, M, y, groups, gate_input, seed, wd_g, wd_h, lr, ep):
 # reported that way.
 #
 # WHICH IS WHY G_adapter_only IS NOT OPTIONAL. Comparing the adapted fusion to
-# A320 would credit the adapter's label access to the PPG side. The only
-# honest increment is
+# A320 would credit the adapter's label access to the PPG side. The increment
+# attributable to PPG is
 #
 #     G_adapter_fusion  -  G_adapter_only
 #
@@ -691,7 +691,7 @@ def oof_alpha(X, M, y, groups, gate_input, seed, wd_g, wd_h, lr, ep):
 #
 # EXPECT A CEILING. The adapter works on the sEHR side, and the sEHR side is
 # not what caps the PPG increment: alpha_fusion already ran the fusion with an
-# undamaged sEHR side (PCA-128 ~ A320) and it still lost. Six methods have now
+# undamaged sEHR side (PCA-128 ~ A320) and did not exceed it. Six methods have now
 # put PPG's marginal contribution at the same small positive value. The
 # realistic best case here is recovering that increment at the EMBEDDING
 # level, which score-level
@@ -705,9 +705,9 @@ def oof_alpha(X, M, y, groups, gate_input, seed, wd_g, wd_h, lr, ep):
 #
 # The top was 0.5 until a run showed one cell selecting that cap in every
 # fold, which is a grid boundary reporting itself rather than a choice.
-# Capping there was an arbitrary restriction, unlike the weight-decay
-# ceiling, which has a principled endpoint -- wd -> infinity converges on the
-# frozen aligned vector, and that is measurably worse. That cell is also
+# That cap had no principled endpoint, unlike the weight-decay ceiling, where
+# wd -> infinity converges on the frozen aligned vector and is measurably
+# worse. That cell is also
 # where PPG alone comes closest to the sEHR baseline -- far closer than on HF
 # or eMACE -- so wanting a larger mixing weight there is what the data would
 # predict.
@@ -1016,10 +1016,10 @@ def run_adapter(Xa, M, y, groups, folds, gate_input, args, mode,
             # base's 1.0:
             #   ||A(x)|| ~ 0.1, cos ~ 0.995  a genuine small correction
             #   ||A(x)|| ~ 1,   cos ~ 0.7    half the direction is new
-            #   ||A(x)|| >> 1,  cos ~ 0      the pretrained vector is
-            #                                vestigial and this is a
-            #                                task-trained encoder wearing a
-            #                                residual's clothes
+            #   ||A(x)|| >> 1,  cos ~ 0      the pretrained vector no
+            #                                longer dominates and the module
+            #                                is a task-trained encoder rather
+            #                                than a residual
             zpost_t = T(Ze[te])
             a_vec = model.adapter(T(ez_te)[:, :pre_dim])
             z_new = torch.nn.functional.normalize(
@@ -1043,7 +1043,8 @@ def run_adapter(Xa, M, y, groups, folds, gate_input, args, mode,
         'alpha_std_within': float(np.mean(a_sd)) if a_sd else np.nan,
         # alpha_std_within is the WITHIN-fold spread averaged over folds, so
         # for a frozen alpha it is identically zero BY CONSTRUCTION and a
-        # printed "+-0.000" reads as stability when it is a tautology. The
+        # printed "+-0.000" reads as stability when it is zero by
+        # construction. The
         # spread that exists is ACROSS folds: a single cell can select alpha
         # anywhere across the grid in its five folds, one of them declining
         # PPG entirely. That is the inner CV failing to identify the mixing
@@ -1119,8 +1120,8 @@ def main():
                           'v_ehr_post, trained jointly with the gate and head '
                           'on downstream labels. Off by default so an '
                           'unflagged run reproduces the existing table '
-                          'exactly. The adapter sees labels, so the only '
-                          'honest PPG increment is G_adapter_fusion minus '
+                          'exactly. The adapter sees labels, so the PPG '
+                          'increment has to be G_adapter_fusion minus '
                           'G_adapter_only -- never against A320.'))
     ap.add_argument('--mlp-sehr', action='store_true',
                     help=('add the H_ rows: the SAME architecture with the '
@@ -1184,7 +1185,7 @@ def main():
                           'the clean run, which the log prints. '
                           'Left unset the grid is searched as before, so the '
                           'choice is visible in the command and the log rather '
-                          'than buried in the code.'))
+                          'than fixed in the code.'))
     ap.add_argument('--lr-adapter', type=float, default=None,
                     help=('separate learning rate for the ADAPTER / MLP '
                           'parameter groups only; gate and head keep --lr. '
@@ -1455,7 +1456,8 @@ def main():
     # ── what got selected, and whether the grid was wide enough ──
     # An axis pinned to a grid edge in EVERY fold does not mean that value is
     # right; it means the search wanted to keep going, and an undertrained
-    # model can look like a weak one for several rounds before anyone checks.
+    # model is indistinguishable from a weak one until the selection is
+    # inspected.
     # These are diagnostics only -- none of them feeds back into the grid
     # automatically.
     # Skipped entirely when --skip-e removed the only rows it describes,
@@ -1522,10 +1524,10 @@ def main():
                 f"{gaps.mean():+.4f}")
           print( "  If that is small next to the fold-to-fold spread, the 48 "
                  "candidates were not\n  distinguishable and the selected values "
-                 "should be reported as arbitrary.")
+                 "are not identified by the inner split.")
       print()
 
-    # ── the adapter's own increment, which is the only honest one ──
+    # ── the adapter's own increment: fusion minus the adapter alone ──
     for pre, on, what in (('G_adapter', args.adapter,
                            'RESIDUAL on the frozen aligned vector'),
                           ('H_mlp', args.mlp_sehr,
@@ -1697,8 +1699,8 @@ def main():
     print('  carries 256 free coefficients against 42-124 positives, so it can')
     print('  and does score BELOW the mixture. C_concat < D means the parallel')
     print('  constraint is buying generalisation; C_concat > E means plain')
-    print('  concatenation is the honest recommendation and the gate is not')
-    print('  earning its place.')
+    print('  concatenation is the recommendation and the gate is not earning')
+    print('  its place.')
     print()
     print('  E vs D isolates LEARNING alpha: same blocks, same classifier, the')
     print('  only difference is per-admission by gradient vs one alpha by CV.')

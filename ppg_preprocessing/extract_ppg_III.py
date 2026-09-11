@@ -189,7 +189,7 @@ if __name__ == "__main__":
 
     # Group selection is explicit, and defaults to every group present. A
     # default that covered one group would make this script process a tenth of
-    # MIMIC-III and exit 0 -- the failure mode that costs a day to notice.
+    # MIMIC-III and exit 0, with no error to notice.
     all_groups = sorted(p.name for p in root.glob("p0?") if p.is_dir())
     if not all_groups:
         raise SystemExit(
