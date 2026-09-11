@@ -91,13 +91,10 @@ D_fixed_alpha is the control that isolates the LEARNING. E and D mix the same
 two blocks with the same classifier; only "alpha per admission, by gradient"
 versus "one alpha, by inner CV" differs.
 
-LIMITATION, stated because it will be asked: E's stage-2 C is selected on
-fused training rows whose alpha came from a gate early-stopped on ~25% of
-those same rows. The test fold is untouched -- the gate never saw it -- so the
-reported AUROC is clean; only the C selection is mildly optimistic.
---oof-alpha removes it by rotating the inner split so every training row gets
-an alpha from a gate that never saw it, at k times the stage-1 cost. Off by
-default.
+E's stage-2 C is selected on fused training rows whose alpha came from a gate
+early-stopped on a fraction of those same rows; the test fold is untouched.
+--oof-alpha rotates the inner split so every training row gets an alpha from a
+gate that never saw it, at k times the stage-1 cost. Off by default.
 
 Usage:
     python alpha_fusion.py --disease AF
@@ -397,9 +394,8 @@ def _pack(X, M, y, i_tr, i_va, gate_input):
     gated_fusion.fit_gate: BlockPrep (StandardScaler + PCA) and the gate's
     scaler have to be fitted INSIDE the inner split, not on the full outer-
     training fold before splitting. Fitting first and splitting after lets the
-    inner-validation rows shape the principal axes, which does not touch the
-    outer test fold -- the reported AUROC stays clean either way -- but does
-    make the hyperparameter selection mildly optimistic.
+    inner-validation rows shape the principal axes, which is what fitting
+    inside the split exists to prevent.
 
     It also matters for symmetry, which is the point of this whole script:
     every sklearn row here carries BlockPrep as a Pipeline step, so

@@ -82,13 +82,6 @@ them side by side without saying so is misleading:
                       PROCEDURE, and the representation cannot be called
                       general-purpose.
 
-The C selection inside this row is also optimistic in a way the others are
-not: its inner-validation rows were part of the data P was fitted on, so the
-inner AUROC that picks C is inflated. That affects only WHICH C is picked;
-the reported test AUROC is clean either way. Fixing it properly means
-refitting the encoder inside every inner split, which is what --oof-alpha
-does for alpha in alpha_fusion and costs one extra encoder fit per inner
-fold. Not done here.
 
 PROTOCOL IS COPIED, NOT REIMPLEMENTED
 -------------------------------------
