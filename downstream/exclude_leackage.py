@@ -89,8 +89,8 @@ def keyset(df_or_list):
     """(dataset, patient_id, hadm_id) as a set of tuples, ids as strings.
 
     patient_id is forced to str because read_csv infers MIMIC-III ids as
-    integers and drops their leading zeros -- '041034' becomes 41034, which
-    matches nothing in the joblib files and produces an empty intersection
+    integers and drops their leading zeros, so a zero-padded id arrives
+    shortened and matches nothing in the joblib files -- an empty intersection
     rather than an error.
     """
     if isinstance(df_or_list, pd.DataFrame):

@@ -74,7 +74,8 @@ def find_ppg_segments_iii(hea_path: str):
     patient_dir = hea.parent
     seg_base = str(hea.with_suffix(""))
     patient_id = hea.parent.name.lstrip("p")
-    record_id = hea.stem.rsplit("_", 1)[0]  # e.g. "3238451_0001" → "3238451"
+    # "<record>_<segment>" -> "<record>"
+    record_id = hea.stem.rsplit("_", 1)[0]
 
     rows = []
 

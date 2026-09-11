@@ -16,9 +16,9 @@ WHAT CHAINING DOES, AND HOW TO TELL IT RAN
 ------------------------------------------
 Adjacent segments of the same patient/record/channel whose timestamps meet
 within one sample are concatenated into a single row, up to MAX_DURATION_S.
-The `segment` field of a chained row is the joined names of its parts --
-"3238451_0002+3238451_0003+..." -- so a `+` in that column is proof this stage
-ran, and its absence on a multi-segment record is proof it did not.
+The `segment` field of a chained row is the joined names of its parts, so a
+`+` in that column is proof this stage ran, and its absence on a multi-segment
+record is proof it did not.
 
 THE III BRANCH IS NOT VALIDATED
 -------------------------------

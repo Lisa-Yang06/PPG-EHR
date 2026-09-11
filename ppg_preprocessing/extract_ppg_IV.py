@@ -64,7 +64,7 @@ def find_ppg_segments(master_hea_path: str):
     """
     master = Path(master_hea_path)
     rec_dir = master.parent
-    record_id = master.stem[:-5]  # Remove '_0000' to get '81739927'
+    record_id = master.stem[:-5]  # drop the '_0000' master suffix
     patient_id = master.parent.parent.name.lstrip("p")
 
     # Read master header to get baseline time and segment list
