@@ -52,8 +52,8 @@ python ppg_preprocessing/extract_ppg_III.py --waveform-dir <mimic3wdb-matched>/1
 python ppg_preprocessing/concat_ppg.py --cohort IV
 python ppg_preprocessing/concat_ppg.py --cohort III --group p00      # once per group
 python ppg_preprocessing/ppg_parquet_per_patient.py --p_dir p00      # III only
-python ppg_preprocessing/ppg_full_preprocessing.py        --dataset IV
-python ppg_preprocessing/convert_to_sample100_10min_pkl.py --dataset IV
+python ppg_preprocessing/ppg_full_preprocessing.py        --dataset both
+python ppg_preprocessing/convert_to_sample100_10min_pkl.py --dataset both
 ```
 
 **2. sEHR-BERT** — code cleaning to a pretrained clinical-code encoder.
