@@ -1,7 +1,6 @@
-# PPG–EHR
+# 🫀 PPG–EHR: EHR-Guided PPG Representation Learning and Admission-Adaptive Fusion
 
-Code accompanying the submission. Anonymised for review.
-
+## 🔬 Overview
 Photoplethysmography carries fine-grained physiological detail but none of the
 clinical context in an electronic health record. This repository aligns
 PaPaGei-s PPG embeddings with sEHR-BERT clinical-code embeddings by
@@ -10,18 +9,18 @@ post-discharge prediction of atrial fibrillation, heart failure and expanded
 MACE at 30/90/180/365 days, using an admission-adaptive mixture-of-experts over
 an sEHR expert, a PPG expert and a joint expert.
 
-## Data
+## 📂 Data
 
-No data and no model weights are included here. MIMIC-III and MIMIC-IV are
+No data is included here. MIMIC-III and MIMIC-IV are
 credentialed datasets distributed by [PhysioNet](https://physionet.org/) under
 a Data Use Agreement; both the clinical modules and the matched waveform
 databases are needed.
 
-The PPG encoder is [PaPaGei](https://github.com/Nokia-Bell-Labs/papagei-foundation-model),
-imported rather than vendored. Clone it separately, obtain its weights under
+The PPG encoder is [PaPaGei](https://github.com/Nokia-Bell-Labs/papagei-foundation-model). 
+Clone it separately, obtain its weights under
 its own terms, and point `PAPAGEI_REPO` at the clone.
 
-## Setup
+## ⚙️ Setup
 
 ```bash
 cp .env.example .env    # then edit the paths
@@ -36,15 +35,15 @@ python paths.py         # prints what resolved
 | `PAPAGEI_REPO` | the PaPaGei clone |
 | `PPG_CACHE_ROOT` | *optional* — a writable cache dir, for clusters with a small home |
 
-Python 3.10. Every stage below is a batch job: extraction and filtering want a
-high-memory node, alignment wants a GPU.
+These stages are intended for batch execution. Waveform extraction and preprocessing 
+can require substantial memory; contrastive alignment requires a GPU.
 
-## Pipeline
+## 🔄 Pipeline
 
-**1. PPG preprocessing** — raw waveforms to per-patient 10-minute blocks.
-MIMIC-III stays sharded by patient group (`p00`..`p09`) until
-`ppg_parquet_per_patient.py`; MIMIC-IV is a single file throughout. Both then
-run the same filter and block builder.
+**1. PPG preprocessing**
+Extract waveforms, filter PPG segments, and construct per-patient 10-minute blocks. 
+MIMIC-III is processed by patient group (p00–`p09`); MIMIC-IV follows a single-file path. 
+Repeat the group-specific MIMIC-III commands for each group.
 
 ```bash
 python ppg_preprocessing/extract_ppg_IV.py  --waveform-dir <mimic4wdb>/0.1.0/waves
@@ -56,8 +55,9 @@ python ppg_preprocessing/ppg_full_preprocessing.py        --dataset both
 python ppg_preprocessing/convert_to_sample100_10min_pkl.py --dataset both
 ```
 
-**2. sEHR-BERT** — code cleaning to a pretrained clinical-code encoder.
-
+**2. sEHR-BERT** 
+Standardize clinical codes, construct longitudinal patient histories, and pretrain 
+sEHR-BERT using masked language modeling.
 ```bash
 python sehr_bert/icd9_to_10.py --gem-i9pcs <gem_i9pcs.txt>
 python sehr_bert/preprocess_medication.py
@@ -67,8 +67,8 @@ python sehr_bert/create_patient_codes_json.py
 python sehr_bert/sEHR_BERT.py                 # masked-language-model pretraining
 ```
 
-**3. Contrastive alignment.** `make_splits.py` writes the patient-level splits
-every later stage reads.
+**3. Contrastive alignment.** 
+Create patient-level splits and train the bidirectional contrastive alignment model.
 
 ```bash
 python alignment/make_splits.py
@@ -76,6 +76,9 @@ python alignment/train_alignment.py
 ```
 
 **4. Downstream evaluation.**
+Construct post-discharge labels, extract admission-level representations and metadata, 
+exclude overlapping input and outcome windows, and evaluate the downstream models. 
+Run scoring separately for AF, HF, and eMACE.
 
 ```bash
 python downstream/build_admission_labels.py
@@ -85,12 +88,14 @@ python downstream/exclude_leackage.py        # drops label/input window overlap
 python downstream/score_fusion.py --disease AF     # then HF, then eMACE
 ```
 
-## Reported results
+## 📊 Evaluation & Outputs
 
-`downstream/score_fusion.py` produces every row of the results and ablation
-tables, one run per disease, and writes per-fold metrics, bootstrap confidence
-intervals and the inner-validation hyperparameter surface as three CSVs in
-`--out-dir`. Row names map onto the paper as:
+Downstream evaluation uses five outer and three inner patient-disjoint cross-validation folds. 
+downstream/score_fusion.py evaluates the primary predictors and expert-combination ablations. 
+For each disease, it writes per-fold metrics, bootstrap confidence intervals, 
+and inner-validation hyperparameter results as CSV files under the specified --out-dir.
+
+The principal CSV setting values correspond to the following models:
 
 | paper | CSV `setting` |
 |---|---|
